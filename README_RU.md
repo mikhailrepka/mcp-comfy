@@ -1,0 +1,193 @@
+# comfy-mcp — MCP-инструменты генерации и редактирования изображений через ComfyUI
+
+Три MCP-сервера для LM Studio, работающие с локальным или удалённым ComfyUI.
+Адрес ComfyUI — **переменная установки**: `./installer/install.sh http://<хост-ComfyUI>:8188`
+(macOS/Linux) или `.\installer\install.ps1 http://<хост-ComfyUI>:8188` (Windows).
+
+| Сервер | Инструменты | Назначение |
+|---|---|---|
+| `comfy-image-gen` | `generate_image`, `check_image` | генерация картинки с нуля (nvidia workflow) |
+| `comfy-image-edit` | `edit_image`, `check_image`, `list_images`, `convert_image` (+ `save_images` только при env `COMFY_ENABLE_SAVE_IMAGES=1`) | редактирование картинки по текстовой инструкции (qwen-image-edit) + конвертация формата/качества |
+| `comfy-image-upscale` | `upscale_image`, `check_image`, `list_images` | нейро-апскейл SeedVR2 |
+
+Ключевая особенность протокола: `edit_image` и `generate_image` **не ждут готовый результат** — они ставят задачу в очередь ComfyUI и сразу возвращают `job_id` («задача взята в работу»). Готовность проверяется периодическими вызовами `check_image`, который возвращает готовую картинку инлайн. Так инструмент не упирается в таймаут tool-вызова (рендеринг занимает 1–5 минут).
+
+English version: [README.md](README.md)
+
+## Мониторинг: ошибки и прогресс
+
+- **Общий реестр задач.** Все три сервера дублируют статусы задач в `~/.comfy_mcp_jobs.json`. `check_image` любого сервера принимает любой `job_id` — даже если задачу создал другой сервер или сервер был перезапущен (для завершённых задач картинка дочитывается с диска). Записи старше суток вычищаются автоматически.
+- **Ошибка/отмена задачи.** Poller на каждом опросе проверяет `status.status_str` в `/history/<prompt_id>`: если задача упала (например, битая картинка в `LoadImage`) или была отменена, `check_image` сразу вернёт описание ошибки — узел, его тип и текст исключения (например, `LoadImage (node 470): cannot identify image file ...`), без ожидания таймаута.
+- **Процент готовности.** Сервер слушает WebSocket ComfyUI (`/ws`) и получает события `progress` (шаги сэмплера). Требуется пакет `websocket-client` (ставится инсталлером). Прогресс виден в ответах `check_image`, пока задача рендерится: `Progress: 10/25 steps (40%)`. Важно: ComfyUI шлёт события прогресса **только клиенту, отправившему задачу** (по `client_id`), поэтому прогресс виден только для задач, запущенных самим MCP-сервером. Пока задача стоит в очереди за чужими задачами, прогресс появится только когда дойдёт до её выполнения.
+
+## Как устроен приём картинок из чата
+
+LM Studio складывает вложения чата в `~/.lmstudio/user-files/` (Windows: `%USERPROFILE%\.lmstudio\user-files\`). Внутри `comfy-image-edit` работает фоновый watch-поток: новые картинки-вложения автоматически копируются в папку inbox (под исходным именем, с префиксом `chat_`), после чего видны через `list_images`. При первом запуске исторические файлы библиотеки не копируются — только новые вложения.
+
+Папки:
+- `~/comfy_edit_inbox` (Windows: `%USERPROFILE%\comfy_edit_inbox`) — входящие картинки для редактирования/апскейла (авто + ручные), общая для edit- и upscale-серверов;
+- `~/comfy_images` (Windows: `%USERPROFILE%\comfy_images`) — сохранённые результаты генерации, редактирования и апскейла.
+
+## Конвертация формата и качества
+
+`convert_image(paths, format, quality)` в `comfy-image-edit` конвертирует картинки в JPG (1–100, default 90) или PNG, сохраняя результат рядом с исходником (для файлов из inbox — прямо в inbox). Типовой сценарий: рендер идёт заметно быстрее с JPG-исходником, поэтому перед `edit_image` большие PNG стоит сжать:
+
+1. `list_images()` → пути;
+2. `convert_image(paths=[...], format="jpg", quality=90)` → пути конвертированных файлов;
+3. `edit_image(..., source_image=<jpg-путь>)`.
+
+JPEG не поддерживает прозрачность — альфа кладётся на белый фон.
+
+## Апскейл (comfy-image-upscale)
+
+`upscale_image(source_image, multiplier | longer_size, scale_method)` — нейро-апскейл SeedVR2 7B через ComfyUI. Масштаб задаётся либо `multiplier` (0.01–8, default 2), либо `longer_size` (целевая длинная сторона в пикселях, соотношение сохраняется) — второй вариант точнее для «довести до 2048px». `scale_method` (default `lanczos`) — интерполяция пред-ресайза внутри пайплайна. Результат — PNG в `~/comfy_images` (сжимать апскейл lossy-конверсией внутри workflow бессмысленно; при необходимости потом примените `convert_image`). Тот же двухфазный протокол: `job_id` → опросы `check_image`; апскейл тяжёлый — рендер может занять заметно дольше редактирования.
+
+## Установка
+
+### Выбор адреса ComfyUI (важно!)
+
+- **LM Studio и ComfyUI на одном компьютере** → используйте `http://localhost:8188`
+  (или `http://127.0.0.1:8188`). Дефолтного режима прослушивания ComfyUI достаточно.
+- **Два компьютера в локальной сети** → используйте `http://<IP-компьютера-ComfyUI>:8188` и:
+  1. запускайте ComfyUI с флагом `--listen 0.0.0.0` (по умолчанию он слушает только
+     `127.0.0.1` и недоступен с других машин);
+  2. **закрепите за обоими компьютерами фиксированные IP в роутере** (DHCP reservation).
+     Если IP компьютера с ComfyUI изменится, сервера молча потеряют цель, пока вы не
+     перезапустите инсталлер с новым URL.
+
+### macOS / Linux
+
+Требования: Python ≥ 3.10 (`brew install python`), LM Studio.
+
+1. Склонировать/скопировать весь репозиторий (серверы `.py`, workflow-файлы `.json`, папку `installer`).
+2. Запустить:
+   ```bash
+   cd comfy-mcp/installer
+   ./install.sh http://<хост-ComfyUI>:8188
+   ```
+   (без аргументов возьмёт дефолтный URL; если подходящий Python не найден, скрипт
+   напечатает точные команды `brew install python@3.14`).
+3. Перезапустить LM Studio (или Developer → MCP → Restart). Появятся инструменты
+   `comfy-image-gen`, `comfy-image-edit` и `comfy-image-upscale`.
+4. Вставить системный промт (ниже) в системный промт модели / project rules в LM Studio.
+
+Скрипт делает: venv + `pip install "mcp<2" websocket-client Pillow`, подстановку URL
+ComfyUI во все серверы, создание рабочих папок, регистрацию серверов в
+`~/.lmstudio/mcp.json` (merge с бэкапом `.bak`, старые записи
+`comfy_mcp_server`/`edit_mcp_server` заменяет на новые имена).
+
+### Windows
+
+Требования: Python ≥ 3.10 (установщик с python.org, галочка «Add python.exe to PATH»,
+или `winget install Python.Python.3.14`), LM Studio.
+
+1. Склонировать/скопировать репозиторий.
+2. В PowerShell:
+   ```powershell
+   cd comfy-mcp\installer
+   .\install.ps1 http://<хост-ComfyUI>:8188
+   ```
+3. Перезапустить LM Studio (Developer → MCP → Restart).
+4. Вставить системный промт (ниже).
+
+PowerShell-инсталлер выполняет те же шаги, что и bash-версия, но с путями Windows:
+venv в `.venv\Scripts\python.exe`, папки inbox/результатов под `%USERPROFILE%`,
+конфиг в `%USERPROFILE%\.lmstudio\mcp.json`.
+
+### Удаление
+
+```bash
+# macOS / Linux
+cd comfy-mcp/installer && ./uninstall.sh
+```
+```powershell
+# Windows
+cd comfy-mcp\installer
+.\uninstall.ps1
+```
+Убирает серверы из `~/.lmstudio/mcp.json` (конфиг бэкапится в `.bak`). Файлы проекта и venv не трогает.
+
+## Системный промт для LM Studio
+
+Скопировать в настройках модели (System Prompt) или в Project Rules:
+
+```
+У тебя есть инструменты для изображений от MCP-серверов comfy-image-gen, comfy-image-edit и comfy-image-upscale:
+- generate_image(prompt, width, height, steps) — новая картинка с нуля.
+- list_images() — картинки в папке inbox (~/comfy_edit_inbox), новые первыми.
+- convert_image(paths, format, quality) — конвертация в jpg (quality 1-100, default 90) или png;
+  результат сохраняется рядом с исходником. Используй перед edit_image, если исходник —
+  большой PNG: JPG-исходник рендерится заметно быстрее.
+- edit_image(prompt, source_image, [reference_image], steps) — редактирование по пути.
+  Возвращает job_id сразу ("задача взята в работу").
+- upscale_image(source_image, multiplier | longer_size, scale_method) — нейро-апскейл SeedVR2
+  (множитель, например 2 или 4, либо целевая длинная сторона в пикселях). Тоже возвращает
+  job_id сразу.
+- check_image(job_id) — опрос готовности. Есть на всех трёх серверах и принимает
+  ЛЮБОЙ job_id (задачи в общем реестре): возвращай картинку по тому же вызову,
+  каким делал задачу, но при необходимости можно опрашивать через любой сервер.
+  Возвращает одно из: готовую картинку (инлайн), "still rendering" с прогрессом
+  (Progress: 10/25 steps, 40%) или описание ошибки (какой узел упал и почему).
+
+Правила:
+- «Нарисуй/сгенерируй» → generate_image.
+- ЛЮБАЯ картинка, которую пользователь упомянул в чате (приложил, прикрепил, перетащил,
+  вставил или ранее сгенерировали/редактировали) → СРАЗУ вызывай list_images: вложения чата
+  и результаты задач автоматически попадают в inbox (первые — через несколько секунд после
+  отправки). НИКОГДА не пытайся сохранить вложение самому и не проси пользователя что-то
+  сохранять — просто возьми путь из list_images. Если картинки ещё нет в списке, подожди
+  пару секунд и вызови list_images ещё раз.
+- Пользователь сам дал путь к файлу → используй напрямую, без list_images.
+- Если картинка так и не появилась в inbox → попроси пользователя положить её в папку
+  ~/comfy_edit_inbox и вызови list_images снова.
+- Перед edit_image большой PNG-исходник (> ~3 МБ) сжимай: convert_image(paths, "jpg", 90) →
+  используй конвертированный путь. Итоговые картинки обычно просят тоже в JPG — тогда
+  конвертируй результат тем же инструментом.
+- «Улучшайзинг/увеличь качество/сделай больше» → upscale_image; используй longer_size,
+  если пользователь назвал целевой размер (например "до 2048px"), иначе multiplier 2-4.
+  Апскейл делает результат PNG в ~/comfy_images; при желании сжать — convert_image.
+- Две картинки для edit_image: source_image — кого редактируем (определяй по содержимому),
+  reference_image — что надеваем/добавляем.
+- Если edit_image/upscale_image вернул job_id → вызывай check_image повторно до появления
+  картинки, НИКОГДА не перезапускай задачу. Рендеринг занимает 1–5 минут (апскейл дольше),
+  между опросами пользователя не спрашивай — просто опрашивай check_image и сообщай
+  прогресс, если он есть в ответе.
+- Если check_image вернул ошибку (например, "cannot identify image file" — битая
+  картинка) → сообщи пользователю текст ошибки и предложи заменить исходник.
+  Не перезапускай ту же задачу с теми же файлами и НЕ переключайся на generate_image.
+- Если check_image ответил "Unknown job_id" → задача потеряна (сервер перезапускался
+  между вызовами). Сообщи об этом и создай задачу заново — ровно один раз.
+```
+
+## Структура проекта
+
+```
+comfy-mcp/
+├── comfy_mcp_server.py              # MCP-сервер генерации (comfy-image-gen)
+├── edit_mcp_server.py               # MCP-сервер редактирования + convert_image (comfy-image-edit)
+├── upscale_mcp_server.py            # MCP-сервер апскейла SeedVR2 (comfy-image-upscale)
+├── jobstore.py                      # общий файловый реестр задач между серверами
+├── nvidia-image-gen.json            # workflow API генерации
+├── image_qwen_image_2_1_image_edit.json  # workflow API редактирования
+├── utility_seedvr2_7b_int8_upscale_image.json  # workflow API апскейла
+└── installer/
+    ├── install.sh                   # инсталлер macOS/Linux (venv + регистрация в LM Studio)
+    ├── install.ps1                  # инсталлер Windows
+    ├── uninstall.sh                 # удаление записей из mcp.json (bash)
+    └── uninstall.ps1                # удаление записей из mcp.json (PowerShell)
+```
+
+## Тонкая настройка (edit_mcp_server.py)
+
+| Константа | Значение по умолчанию | Смысл |
+|---|---|---|
+| `PC` | `http://192.168.1.218:8188` | адрес ComfyUI (меняется install.sh) |
+| `INBOX_DIR` | `~/comfy_edit_inbox` | входящие картинки |
+| `LM_FILES_DIR` | `~/.lmstudio/user-files` | откуда watch-поток берёт вложения чата |
+| `WATCH_INTERVAL` | `5` c | период сканирования вложений |
+| `CHECK_WAIT_DEFAULT` | `20` c | сколько `check_image` ждёт за один вызов |
+| `CHECK_WAIT_MAX` | `120` c | верхний предел `wait` для `check_image` |
+
+(то же относится к `comfy_mcp_server.py`, кроме inbox/watch-констант)
+
+`watch`-поток живёт внутри MCP-сервера, т.е. копирование вложений работает, пока LM Studio подключена к серверу (в активной сессии — всегда). Состояние «что уже скопировано» хранится в `.lmstudio_seen.json` рядом с сервером.
