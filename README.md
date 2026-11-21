@@ -180,6 +180,54 @@ cd comfy-mcp\installer
 Removes the servers from `~/.lmstudio/mcp.json` (config backed up to `.bak`).
 Repo files and the venv are untouched.
 
+## Using with other MCP clients
+
+The servers are standard **stdio MCP servers** — nothing in them is specific to
+LM Studio. Any MCP client can run them: point the client at
+`<repo>/.venv/bin/python` (macOS/Linux) or `<repo>\.venv\Scripts\python.exe`
+(Windows) with the server script as the argument. The installer only automates
+venv creation and the registration below.
+
+| Client | Registration | Notes |
+|---|---|---|
+| LM Studio | `~/.lmstudio/mcp.json` (done by the installer) | chat-attachment auto-copy watcher is enabled |
+| ZCode | workspace/user MCP config, same server entries | chat attachments have real file paths → enable `COMFY_ENABLE_SAVE_IMAGES=1` in the server env to get `save_images` |
+| OpenCode | `opencode.json` → `"mcp": {"comfy-image-edit": {"type": "local", "command": [...], "env": {...}}}` | same entries as below |
+| Claude Desktop / Cursor | `claude_desktop_config.json` / `~/.cursor/mcp.json` → standard `mcpServers` block | attachments have no paths → use the inbox flow (`list_images`) |
+| Ollama | not an MCP client by itself | needs a bridge (e.g. `mcpo`) that exposes MCP tools over the Ollama chat API |
+
+The generic registration block (works for most clients):
+
+```json
+{
+  "mcpServers": {
+    "comfy-image-gen": {
+      "command": "/path/to/comfy-mcp/.venv/bin/python",
+      "args": ["/path/to/comfy-mcp/comfy_mcp_server.py"],
+      "env": {}
+    },
+    "comfy-image-edit": {
+      "command": "/path/to/comfy-mcp/.venv/bin/python",
+      "args": ["/path/to/comfy-mcp/edit_mcp_server.py"],
+      "env": { "COMFY_ENABLE_SAVE_IMAGES": "1" }
+    },
+    "comfy-image-upscale": {
+      "command": "/path/to/comfy-mcp/.venv/bin/python",
+      "args": ["/path/to/comfy-mcp/upscale_mcp_server.py"],
+      "env": {}
+    }
+  }
+}
+```
+
+Client-agnostic notes:
+- the two-phase `job_id`/`check_image` protocol exists precisely because tool-call
+  timeouts differ per client — it works everywhere;
+- the system prompt (below) needs the `list_images`-based attachment flow for
+  clients without file-path attachments; for clients like ZCode enable
+  `save_images` and prefer it;
+- `jobstore` and the inbox folder are shared across all clients on the machine.
+
 ## System prompt for LM Studio
 
 Paste into the model settings (System Prompt) or Project Rules:

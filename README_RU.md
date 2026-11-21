@@ -137,6 +137,54 @@ cd comfy-mcp\installer
 ```
 Убирает серверы из `~/.lmstudio/mcp.json` (конфиг бэкапится в `.bak`). Файлы проекта и venv не трогает.
 
+## Использование с другими MCP-клиентами
+
+Сервера — стандартные **stdio MCP-серверы**, в них нет ничего специфичного для
+LM Studio. Любой MCP-клиент может их запустить: укажите клиенту
+`<repo>/.venv/bin/python` (macOS/Linux) или `<repo>\.venv\Scripts\python.exe`
+(Windows) со скриптом сервера в аргументах. Инсталлер лишь автоматизирует
+создание venv и регистрацию ниже.
+
+| Клиент | Регистрация | Примечания |
+|---|---|---|
+| LM Studio | `~/.lmstudio/mcp.json` (делает инсталлер) | включён watch-поток автоприёма вложений чата |
+| ZCode | MCP-конфиг workspace/user, те же записи серверов | вложения чата — реальные файлы → включите `COMFY_ENABLE_SAVE_IMAGES=1` в env сервера, чтобы получить `save_images` |
+| OpenCode | `opencode.json` → `"mcp": {"comfy-image-edit": {"type": "local", "command": [...], "env": {...}}}` | те же записи, что ниже |
+| Claude Desktop / Cursor | `claude_desktop_config.json` / `~/.cursor/mcp.json` → стандартный блок `mcpServers` | у вложений нет путей → используйте flow с inbox (`list_images`) |
+| Ollama | сам по себе не MCP-клиент | нужен мост (например `mcpo`), который выставляет MCP-инструменты через chat API Ollama |
+
+Универсальный блок регистрации (подходит большинству клиентов):
+
+```json
+{
+  "mcpServers": {
+    "comfy-image-gen": {
+      "command": "/path/to/comfy-mcp/.venv/bin/python",
+      "args": ["/path/to/comfy-mcp/comfy_mcp_server.py"],
+      "env": {}
+    },
+    "comfy-image-edit": {
+      "command": "/path/to/comfy-mcp/.venv/bin/python",
+      "args": ["/path/to/comfy-mcp/edit_mcp_server.py"],
+      "env": { "COMFY_ENABLE_SAVE_IMAGES": "1" }
+    },
+    "comfy-image-upscale": {
+      "command": "/path/to/comfy-mcp/.venv/bin/python",
+      "args": ["/path/to/comfy-mcp/upscale_mcp_server.py"],
+      "env": {}
+    }
+  }
+}
+```
+
+Независимые от клиента заметки:
+- двухфазный протокол `job_id`/`check_image` существует именно потому, что
+  таймауты tool-вызовов у всех клиентов разные — он работает везде;
+- системный промт (ниже) рассчитан на flow вложений через `list_images` — он
+  нужен клиентам, где вложения без путей к файлам; для клиентов вроде ZCode
+  включайте `save_images` и используйте его;
+- `jobstore` и папка inbox общие для всех клиентов на машине.
+
 ## Системный промт для LM Studio
 
 Скопировать в настройках модели (System Prompt) или в Project Rules:
