@@ -24,7 +24,7 @@ from mcp.types import ImageContent, TextContent, Tool
 
 import jobstore
 
-PC = "http://192.168.1.218:8188"
+PC = "http://localhost:8188"
 WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nvidia-image-gen.json")
 OUTPUT_DIR = os.path.expanduser("~/comfy_images")
 FAST_WAIT = 90        # сколько generate_image ждёт результат сама, секунд

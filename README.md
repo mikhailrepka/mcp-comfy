@@ -78,6 +78,26 @@ result with a lossy conversion inside the workflow is pointless; apply
 repeated `check_image`; upscaling is heavy — rendering can take noticeably
 longer than editing.
 
+## Requirements on the ComfyUI side
+
+The `*.json` files in this repo are **ComfyUI workflow API exports** — they are
+submitted to ComfyUI as-is. The target ComfyUI instance must therefore have the
+same models and custom nodes installed, otherwise jobs fail with execution
+errors (the error text is returned by `check_image`, so a missing model is easy
+to identify).
+
+| Workflow file | Models (in ComfyUI `models/` folders) | Custom nodes |
+|---|---|---|
+| `nvidia-image-gen.json` | `z_image_turbo_bf16.safetensors` (diffusion models), `qwen_3_4b.safetensors` (text encoders), `ae.safetensors` (vae) | core nodes only |
+| `image_qwen_image_2_1_image_edit.json` | `qwen_image_2.1_int8_convrot.safetensors`, `qwen3vl_8b_int8_convrot.safetensors`, `qwen_image_2.1_vae_bf16.safetensors`, `qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors` | `SaveImageAdvanced`, `TextEncodeQwenImage21`, `QwenImage21Cache`, `ComfySwitchNode`, `BatchImagesNode`, `PrimitiveStringMultiline`, `TextGenerate`, `PreviewAny` |
+| `utility_seedvr2_7b_int8_upscale_image.json` | `seedvr2_7b_int8_convrot.safetensors`, `seedvr2_ema_vae_fp16.safetensors` | SeedVR2 custom nodes (`SeedVR2Preprocess`, `SeedVR2Conditioning`, `SeedVR2PostProcessing`), `ResizeImageMaskNode`, `JoinImageWithAlpha`, `VAEEncodeTiled`, `VAEDecodeTiled` |
+
+If you use different models/workflows, export your own workflow in API format
+(ComfyUI: "Workflow → Export (API)") and replace the corresponding `.json`
+file — the servers reference nodes by id, so keep the node ids used in the
+server's `*_SERVER`-style constants (save-node id and text/size inputs) or
+update them at the top of the server file.
+
 ## Installation
 
 ### Choosing the ComfyUI address (important!)
@@ -222,7 +242,7 @@ comfy-mcp/
 
 | Constant | Default | Meaning |
 |---|---|---|
-| `PC` | `http://192.168.1.218:8188` | ComfyUI address (rewritten by the installer) |
+| `PC` | `http://localhost:8188` | ComfyUI address (rewritten by the installer) |
 | `INBOX_DIR` | `~/comfy_edit_inbox` | incoming images |
 | `LM_FILES_DIR` | `~/.lmstudio/user-files` | where the watcher picks up chat attachments |
 | `WATCH_INTERVAL` | `5` s | attachment scan period |

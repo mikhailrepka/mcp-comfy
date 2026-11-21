@@ -1,10 +1,10 @@
 # comfy-mcp installer for Windows (PowerShell 5.1+ / PowerShell 7).
 # Usage:
 #   .\install.ps1 <PC_URL>
-#   .\install.ps1                                # default http://192.168.1.218:8188
+#   .\install.ps1                                # default http://localhost:8188
 # One computer (LM Studio + ComfyUI together): use http://localhost:8188
 param(
-    [string]$PC_URL = "http://192.168.1.218:8188"
+    [string]$PC_URL = "http://localhost:8188"
 )
 
 $ErrorActionPreference = "Stop"

@@ -30,7 +30,7 @@ from mcp.types import ImageContent, TextContent, Tool
 
 import jobstore
 
-PC = "http://192.168.1.218:8188"
+PC = "http://localhost:8188"
 WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image_qwen_image_2_1_image_edit.json")
 OUTPUT_DIR = os.path.expanduser("~/comfy_images")
 INBOX_DIR = os.path.expanduser("~/comfy_edit_inbox")  # сюда пользователь кладёт картинки для редактирования

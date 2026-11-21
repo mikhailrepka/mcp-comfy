@@ -7,7 +7,7 @@
 #
 # Использование:
 #   ./install.sh [PC_URL]
-# По умолчанию PC_URL = http://192.168.1.218:8188
+# По умолчанию PC_URL = http://localhost:8188
 #
 # Что делает:
 #   1. находит Python >= 3.10, создаёт .venv, ставит "mcp<2", websocket-client, Pillow;
@@ -18,7 +18,7 @@
 #   5. проверяет доступность ComfyUI.
 set -euo pipefail
 
-PC_URL="${1:-http://192.168.1.218:8188}"
+PC_URL="${1:-http://localhost:8188}"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"   # корень проекта comfy-mcp
 cd "$DIR"
 

@@ -25,7 +25,7 @@ from mcp.types import ImageContent, TextContent, Tool
 
 import jobstore
 
-PC = "http://192.168.1.218:8188"
+PC = "http://localhost:8188"
 WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "utility_seedvr2_7b_int8_upscale_image.json")
 OUTPUT_DIR = os.path.expanduser("~/comfy_images")
 INBOX_DIR = os.path.expanduser("~/comfy_edit_inbox")  # общая папка с edit-сервером

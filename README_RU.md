@@ -42,6 +42,25 @@ JPEG не поддерживает прозрачность — альфа кл�
 
 `upscale_image(source_image, multiplier | longer_size, scale_method)` — нейро-апскейл SeedVR2 7B через ComfyUI. Масштаб задаётся либо `multiplier` (0.01–8, default 2), либо `longer_size` (целевая длинная сторона в пикселях, соотношение сохраняется) — второй вариант точнее для «довести до 2048px». `scale_method` (default `lanczos`) — интерполяция пред-ресайза внутри пайплайна. Результат — PNG в `~/comfy_images` (сжимать апскейл lossy-конверсией внутри workflow бессмысленно; при необходимости потом примените `convert_image`). Тот же двухфазный протокол: `job_id` → опросы `check_image`; апскейл тяжёлый — рендер может занять заметно дольше редактирования.
 
+## Требования к ComfyUI
+
+Файлы `*.json` в этом репозитории — **API-экспорты workflow ComfyUI**: они
+отправляются в ComfyUI как есть. Поэтому на целевом ComfyUI должны быть
+установлены те же модели и кастомные ноды, иначе задачи будут падать с ошибками
+выполнения (текст ошибки возвращается через `check_image`, так что отсутствие
+модели легко диагностировать).
+
+| Файл workflow | Модели (в папках `models/` ComfyUI) | Кастомные ноды |
+|---|---|---|
+| `nvidia-image-gen.json` | `z_image_turbo_bf16.safetensors` (diffusion models), `qwen_3_4b.safetensors` (text encoders), `ae.safetensors` (vae) | только core-ноды |
+| `image_qwen_image_2_1_image_edit.json` | `qwen_image_2.1_int8_convrot.safetensors`, `qwen3vl_8b_int8_convrot.safetensors`, `qwen_image_2.1_vae_bf16.safetensors`, `qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors` | `SaveImageAdvanced`, `TextEncodeQwenImage21`, `QwenImage21Cache`, `ComfySwitchNode`, `BatchImagesNode`, `PrimitiveStringMultiline`, `TextGenerate`, `PreviewAny` |
+| `utility_seedvr2_7b_int8_upscale_image.json` | `seedvr2_7b_int8_convrot.safetensors`, `seedvr2_ema_vae_fp16.safetensors` | кастомные ноды SeedVR2 (`SeedVR2Preprocess`, `SeedVR2Conditioning`, `SeedVR2PostProcessing`), `ResizeImageMaskNode`, `JoinImageWithAlpha`, `VAEEncodeTiled`, `VAEDecodeTiled` |
+
+Если используете другие модели/workflows — экспортируйте свой workflow в API-формате
+(ComfyUI: «Workflow → Export (API)») и замените соответствующий `.json`-файл.
+Серверы ссылаются на ноды по id, поэтому сохраните id узлов, зашитые в константах
+в шапке сервера (id save-ноды и текстовых/размерных входов), либо обновите их.
+
 ## Установка
 
 ### Выбор адреса ComfyUI (важно!)
@@ -181,7 +200,7 @@ comfy-mcp/
 
 | Константа | Значение по умолчанию | Смысл |
 |---|---|---|
-| `PC` | `http://192.168.1.218:8188` | адрес ComfyUI (меняется install.sh) |
+| `PC` | `http://localhost:8188` | адрес ComfyUI (меняется install.sh) |
 | `INBOX_DIR` | `~/comfy_edit_inbox` | входящие картинки |
 | `LM_FILES_DIR` | `~/.lmstudio/user-files` | откуда watch-поток берёт вложения чата |
 | `WATCH_INTERVAL` | `5` c | период сканирования вложений |
