@@ -1,0 +1,14 @@
+# локальные артефакты
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# runtime-состояние (не секреты, но личное/локальное)
+.lmstudio_seen.json
+
+# секреты и личные конфиги не должны попадать в репозиторий
+auth.json
+bot.env
+*.env
+!*.env.example
