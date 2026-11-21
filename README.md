@@ -78,6 +78,18 @@ result with a lossy conversion inside the workflow is pointless; apply
 repeated `check_image`; upscaling is heavy — rendering can take noticeably
 longer than editing.
 
+## Workflow files
+
+The three `*.json` files in the repo root are **required** — each server loads
+its workflow at submit time and sends it to ComfyUI with every job. They are
+plain ComfyUI workflow API exports and contain **no local data** (no paths,
+addresses or machine info; only node ids, parameters and model filenames listed
+in the table below). Nothing needs to be downloaded into ComfyUI to use them —
+they are submitted over the API, not installed. If you use different models,
+export your own workflow in API format and replace the corresponding file
+(keep the node ids referenced in the server's header constants — see the
+requirements table below).
+
 ## Requirements on the ComfyUI side
 
 The `*.json` files in this repo are **ComfyUI workflow API exports** — they are
