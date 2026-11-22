@@ -78,14 +78,31 @@ def _upload_image(path):
     return resp.get("name", fname)
 
 
-def _submit(prompt, source_name, ref_name, steps):
+def _submit(prompt, source_name, ref_name, steps, seed=None):
+    """Ставит задачу в очередь. Возвращает (prompt_id, seed)."""
     with open(WORKFLOW) as f:
         wf = json.load(f)
     wf[NODE_SOURCE]["inputs"]["image"] = source_name
     if NODE_REF and ref_name:
         wf[NODE_REF]["inputs"]["image"] = ref_name
+    elif NODE_REF:
+        # Референс не передан — вырезаем его узел из графа ВМЕСТЕ со всеми
+        # входами-ссылками на него. ComfyUI валидирует ВСЕ узлы графа, включая
+        # неактивные ветки: оставшийся LoadImage с дефолтным именем файла из
+        # шаблона даёт 400 'Invalid image file', если этого файла нет во
+        # входной папке PC (наблюдалось live 2026-11-23,
+        # clothing_light_blue_denim_shirt.png).
+        wf.pop(NODE_REF, None)
+        for node in wf.values():
+            ins = node.get("inputs")
+            if not isinstance(ins, dict):
+                continue
+            node["inputs"] = {k: v for k, v in ins.items()
+                              if not (isinstance(v, list) and v[0] == NODE_REF)}
     wf[NODE_PROMPT]["inputs"]["prompt"] = prompt
-    wf[NODE_SAMPLER]["inputs"]["seed"] = random.randint(0, 2 ** 32)
+    if seed is None:
+        seed = random.randint(0, 2 ** 32)
+    wf[NODE_SAMPLER]["inputs"]["seed"] = int(seed)
     if "steps" in wf[NODE_SAMPLER]["inputs"]:
         wf[NODE_SAMPLER]["inputs"]["steps"] = steps
     req = urllib.request.Request(
@@ -93,7 +110,34 @@ def _submit(prompt, source_name, ref_name, steps):
         data=json.dumps({"prompt": wf, "client_id": CLIENT_ID}).encode(),
         headers={"Content-Type": "application/json"},
     )
-    return json.loads(urllib.request.urlopen(req, timeout=30).read())["prompt_id"]
+    try:
+        return json.loads(urllib.request.urlopen(req, timeout=30).read())["prompt_id"], seed
+    except urllib.error.HTTPError as e:
+        # причина отказа валидации лежит в теле ответа — без этого клиент видит
+        # только "HTTP Error 400" и не может понять, что не так
+        raise RuntimeError(_prompt_error_text(e)) from None
+
+
+def _prompt_error_text(e):
+    """Читаемое описание отказа /prompt из тела 400 (error + node_errors)."""
+    try:
+        body = json.loads(e.read().decode())
+    except Exception:
+        return f"ComfyUI rejected the prompt: HTTP {e.code}"
+    parts = []
+    err = body.get("error") or {}
+    if err.get("message"):
+        parts.append(str(err["message"]))
+    for nid, ne in (body.get("node_errors") or {}).items():
+        if not isinstance(ne, dict):
+            continue
+        for d in ne.get("errors", []):
+            msg = d.get("message", "?")
+            det = d.get("details", "")
+            parts.append(f"node {nid}: {msg}" + (f" — {det}" if det else ""))
+    if not parts:
+        return f"ComfyUI rejected the prompt: HTTP {e.code}"
+    return "ComfyUI rejected the prompt: " + "; ".join(parts)
 
 
 def _history(prompt_id):
@@ -170,12 +214,13 @@ def _ws_listen_loop():
             time.sleep(3)  # PC недоступен — ретрай
 
 
-def _start_job(prompt, source_path, ref_path, steps, job_id):
+def _start_job(prompt, source_path, ref_path, steps, job_id, seed=None):
     """Загружает картинки на PC и ставит задачу в очередь. Возвращает prompt_id."""
     src = _upload_image(source_path)
     ref = _upload_image(ref_path) if (NODE_REF and ref_path) else None
-    pid = _submit(prompt, src, ref, steps)
+    pid, seed = _submit(prompt, src, ref, steps, seed)
     jobs[job_id]["prompt_id"] = pid
+    jobs[job_id]["seed"] = seed
     return pid
 
 
@@ -198,8 +243,9 @@ def _poll_job(job_id):
             res = None
             job["note"] = f"poll error: {e}"
         if res:
-            jobs[job_id] = {"status": "done", "path": res[0], "data": res[1]}
-            jobstore.put(job_id, {"status": "done", "path": res[0]})
+            jobs[job_id] = {"status": "done", "path": res[0], "data": res[1],
+                            "seed": job.get("seed")}
+            jobstore.put(job_id, {"status": "done", "path": res[0], "seed": job.get("seed")})
             return
         pr = ws_progress.get(pid)
         if pr and pr != job.get("progress"):
@@ -427,7 +473,8 @@ def _content_for_result(job):
             data=base64.b64encode(job["data"]).decode(),
             mimeType="image/png",
         ))
-        content.append(TextContent(type="text", text=f"Edited image: {job['path']}"))
+        seed_note = f"\nSeed: {job['seed']}" if job.get("seed") is not None else ""
+        content.append(TextContent(type="text", text=f"Edited image: {job['path']}{seed_note}"))
     else:
         content.append(TextContent(type="text", text=f"Edit failed: {job['error']}"))
     return content
@@ -442,7 +489,7 @@ def _foreign_check(job_id, wait=1):
                      f"start a new task.")]
     status = rec.get("status")
     if status == "done":
-        return _image_file_content(rec["path"])
+        return _image_file_content(rec["path"], rec.get("seed"))
     if status == "error":
         return [TextContent(type="text", text=f"Task failed: {rec.get('error')}")]
     pr = rec.get("progress")
@@ -452,7 +499,7 @@ def _foreign_check(job_id, wait=1):
     time.sleep(min(wait, 5))
     rec = jobstore.get(job_id) or rec
     if rec.get("status") == "done":
-        return _image_file_content(rec["path"])
+        return _image_file_content(rec["path"], rec.get("seed"))
     if rec.get("status") == "error":
         return [TextContent(type="text", text=f"Task failed: {rec.get('error')}")]
     return [TextContent(type="text",
@@ -460,14 +507,15 @@ def _foreign_check(job_id, wait=1):
                  f"server).{prog} Call check_image again.")]
 
 
-def _image_file_content(path):
+def _image_file_content(path, seed=None):
     mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}.get(
         path.rsplit(".", 1)[-1].lower(), "image/png")
     with open(path, "rb") as fh:
         data = fh.read()
+    seed_note = f"\nSeed: {seed}" if seed is not None else ""
     return [
         ImageContent(type="image", data=base64.b64encode(data).decode(), mimeType=mime),
-        TextContent(type="text", text=f"Image ready: {path}"),
+        TextContent(type="text", text=f"Image ready: {path}{seed_note}"),
     ]
 
 
@@ -503,6 +551,12 @@ async def _list_tools_impl():
             "type": "integer",
             "description": "Number of sampling steps. Default 25.",
             "default": 25,
+        },
+        "seed": {
+            "type": "integer",
+            "description": "Optional: fix the seed to reproduce or iterate on a previous "
+                           "edit (the used seed is returned in the result text). "
+                           "Default: random.",
         },
     }
     if NODE_REF:
@@ -649,6 +703,8 @@ async def call_tool(name, arguments):
         source_path = arguments["source_image"]
         ref_path = arguments.get("reference_image")
         steps = int(arguments.get("steps", 25))
+        seed = arguments.get("seed")
+        seed = int(seed) if seed is not None else None
         if not os.path.isfile(source_path):
             return [TextContent(
                 type="text",
@@ -658,7 +714,8 @@ async def call_tool(name, arguments):
         job_id = f"job_{random.randint(0, 10**8)}"
         jobs[job_id] = {"status": "queued"}
         try:
-            await asyncio.to_thread(_start_job, prompt, source_path, ref_path, steps, job_id)
+            await asyncio.to_thread(_start_job, prompt, source_path, ref_path, steps,
+                                    job_id, seed)
         except Exception as e:
             jobs[job_id] = {"status": "error", "error": str(e)}
             return _content_for_result(jobs[job_id])
