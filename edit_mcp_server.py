@@ -30,7 +30,7 @@ from mcp.types import ImageContent, TextContent, Tool
 
 import jobstore
 
-PC = "http://localhost:8188"
+PC = "http://192.168.1.218:8188"
 WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image_qwen_image_2_1_image_edit.json")
 OUTPUT_DIR = os.path.expanduser("~/comfy_images")
 INBOX_DIR = os.path.expanduser("~/comfy_edit_inbox")  # сюда пользователь кладёт картинки для редактирования
@@ -228,7 +228,7 @@ def _list_inbox():
     return out
 
 
-def _convert_images(paths, fmt="jpg", quality=90):
+def _convert_images(paths, fmt="jpg", quality=90, max_width=None, max_height=None):
     """Конвертирует картинки в fmt (jpg/png) с качеством quality, сохраняя рядом
     с исходником (для файлов в INBOX_DIR) — возвращает список новых путей."""
     from PIL import Image
@@ -238,9 +238,13 @@ def _convert_images(paths, fmt="jpg", quality=90):
         fmt, pil_fmt, ext = "jpg", "JPEG", ".jpg"
     elif fmt == "png":
         fmt, pil_fmt, ext = "png", "PNG", ".png"
+    elif fmt == "webp":
+        fmt, pil_fmt, ext = "webp", "WEBP", ".webp"
     else:
-        raise ValueError(f"Unsupported format: {fmt} (use jpg or png)")
+        raise ValueError(f"Unsupported format: {fmt} (use jpg, png or webp)")
     quality = max(1, min(int(quality), 100))
+    max_width = int(max_width) if max_width else None
+    max_height = int(max_height) if max_height else None
 
     converted = []
     for p in paths:
@@ -255,6 +259,13 @@ def _convert_images(paths, fmt="jpg", quality=90):
             dst = f"{root}_{n}{ext}"
             n += 1
         with Image.open(p) as im:
+            if max_width or max_height:
+                w, h = im.size
+                scale = min((max_width / w) if max_width else 1.0,
+                            (max_height / h) if max_height else 1.0, 1.0)
+                if scale < 1.0:
+                    im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                                   Image.LANCZOS)
             if pil_fmt == "JPEG":
                 # JPEG не умеет альфу — кладём на белый фон
                 if im.mode in ("RGBA", "LA", "P"):
@@ -265,6 +276,8 @@ def _convert_images(paths, fmt="jpg", quality=90):
                 else:
                     im = im.convert("RGB")
                 im.save(dst, pil_fmt, quality=quality, optimize=True)
+            elif pil_fmt == "WEBP":
+                im.save(dst, pil_fmt, quality=quality)
             else:
                 im.save(dst, pil_fmt)
         converted.append(dst)
@@ -581,14 +594,22 @@ async def _list_tools_impl():
                     },
                     "format": {
                         "type": "string",
-                        "enum": ["jpg", "png"],
+                        "enum": ["jpg", "png", "webp"],
                         "description": "Target format. Default jpg.",
                         "default": "jpg",
                     },
                     "quality": {
                         "type": "integer",
-                        "description": "JPG quality 1-100. Default 90.",
+                        "description": "JPG/WEBP quality 1-100. Default 90.",
                         "default": 90,
+                    },
+                    "max_width": {
+                        "type": "integer",
+                        "description": "Optional: downscale so width <= this (aspect preserved, never upscales). E.g. 1920 for phone photos.",
+                    },
+                    "max_height": {
+                        "type": "integer",
+                        "description": "Optional: downscale so height <= this (aspect preserved, never upscales).",
                     },
                 },
                 "required": ["paths"],
@@ -679,12 +700,17 @@ async def call_tool(name, arguments):
         if not paths:
             return [TextContent(type="text", text="Nothing to convert: pass `paths`.")]
         try:
-            converted = await asyncio.to_thread(_convert_images, paths, fmt, quality)
+            converted = await asyncio.to_thread(
+                _convert_images, paths, fmt, quality,
+                arguments.get("max_width"), arguments.get("max_height"))
         except Exception as e:
             return [TextContent(type="text", text=f"Convert failed: {e}")]
         ok = [p for p in converted if not p.startswith("NOT FOUND")]
         bad = [p for p in converted if p.startswith("NOT FOUND")]
-        lines = [f"Converted to {fmt} (quality={quality}):"] + [f"  {p}" for p in ok] + bad
+        size_note = ""
+        if arguments.get("max_width") or arguments.get("max_height"):
+            size_note = f", max {arguments.get('max_width') or '∞'}x{arguments.get('max_height') or '∞'}"
+        lines = [f"Converted to {fmt} (quality={quality}{size_note}):"] + [f"  {p}" for p in ok] + bad
         lines.append("Pass these paths to edit_image / upscale_image.")
         return [TextContent(type="text", text="\n".join(lines))]
 

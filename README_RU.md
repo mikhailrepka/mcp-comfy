@@ -30,10 +30,10 @@ LM Studio складывает вложения чата в `~/.lmstudio/user-fi
 
 ## Конвертация формата и качества
 
-`convert_image(paths, format, quality)` в `comfy-image-edit` конвертирует картинки в JPG (1–100, default 90) или PNG, сохраняя результат рядом с исходником (для файлов из inbox — прямо в inbox). Типовой сценарий: рендер идёт заметно быстрее с JPG-исходником, поэтому перед `edit_image` большие PNG стоит сжать:
+`convert_image(paths, format, quality, max_width, max_height)` в `comfy-image-edit` конвертирует картинки в JPG/PNG/WEBP (качество 1–100, default 90), опционально уменьшая так, чтобы ширина ≤ `max_width` и/или высота ≤ `max_height` (пропорции сохраняются, апскейла нет — идеально для фотографий с телефона), сохраняя результат рядом с исходником (для файлов из inbox — прямо в inbox). Типовой сценарий: рендер идёт заметно быстрее с уменьшенным JPG-исходником, поэтому перед `edit_image` большие фото стоит сжать:
 
 1. `list_images()` → пути;
-2. `convert_image(paths=[...], format="jpg", quality=90)` → пути конвертированных файлов;
+2. `convert_image(paths=[...], format="jpg", quality=85, max_width=1920)` → пути конвертированных файлов;
 3. `edit_image(..., source_image=<jpg-путь>)`.
 
 JPEG не поддерживает прозрачность — альфа кладётся на белый фон.
@@ -193,7 +193,8 @@ LM Studio. Любой MCP-клиент может их запустить: ук�
 У тебя есть инструменты для изображений от MCP-серверов comfy-image-gen, comfy-image-edit и comfy-image-upscale:
 - generate_image(prompt, width, height, steps) — новая картинка с нуля.
 - list_images() — картинки в папке inbox (~/comfy_edit_inbox), новые первыми.
-- convert_image(paths, format, quality) — конвертация в jpg (quality 1-100, default 90) или png;
+- convert_image(paths, format, quality, max_width, max_height) — конвертация в jpg/png/webp (quality 1-100,
+  default 90), опционально уменьшение (например max_width=1920 для фото с телефона);
   результат сохраняется рядом с исходником. Используй перед edit_image, если исходник —
   большой PNG: JPG-исходник рендерится заметно быстрее.
 - edit_image(prompt, source_image, [reference_image], steps) — редактирование по пути.
@@ -218,7 +219,7 @@ LM Studio. Любой MCP-клиент может их запустить: ук�
 - Пользователь сам дал путь к файлу → используй напрямую, без list_images.
 - Если картинка так и не появилась в inbox → попроси пользователя положить её в папку
   ~/comfy_edit_inbox и вызови list_images снова.
-- Перед edit_image большой PNG-исходник (> ~3 МБ) сжимай: convert_image(paths, "jpg", 90) →
+- Перед edit_image большой исходник (> ~3 МБ или > 2000 px) сжимай: convert_image(paths, "jpg", 90, 1920) →
   используй конвертированный путь. Итоговые картинки обычно просят тоже в JPG — тогда
   конвертируй результат тем же инструментом.
 - «Улучшайзинг/увеличь качество/сделай больше» → upscale_image; используй longer_size,

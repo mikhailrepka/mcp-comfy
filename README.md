@@ -54,13 +54,14 @@ Folders:
 
 ## Format/quality conversion
 
-`convert_image(paths, format, quality)` in `comfy-image-edit` converts images
-to JPG (quality 1–100, default 90) or PNG, saving the result next to the
+`convert_image(paths, format, quality, max_width, max_height)` in `comfy-image-edit` converts images
+to JPG/PNG/WEBP (quality 1–100, default 90), optionally downscaling so width ≤ `max_width` and/or
+height ≤ `max_height` (aspect preserved, never upscales — ideal for large phone photos), saving the result next to the
 original (inbox files stay in the inbox). Typical use case: rendering is
 noticeably faster with a JPG source, so shrink large PNGs before `edit_image`:
 
 1. `list_images()` → paths;
-2. `convert_image(paths=[...], format="jpg", quality=90)` → converted paths;
+2. `convert_image(paths=[...], format="jpg", quality=85, max_width=1920)` → converted paths;
 3. `edit_image(..., source_image=<jpg path>)`.
 
 JPEG does not support transparency — alpha is flattened onto a white background.
@@ -236,7 +237,8 @@ Paste into the model settings (System Prompt) or Project Rules:
 You have image tools from the comfy-image-gen, comfy-image-edit and comfy-image-upscale MCP servers:
 - generate_image(prompt, width, height, steps) — a new image from scratch.
 - list_images() — images in the inbox folder (~/comfy_edit_inbox), newest first.
-- convert_image(paths, format, quality) — convert to jpg (quality 1-100, default 90) or png;
+- convert_image(paths, format, quality, max_width, max_height) — convert to jpg/png/webp (quality 1-100,
+  default 90), optionally downscale (e.g. max_width=1920 for phone photos);
   the result is saved next to the original. Use before edit_image when the source is
   a large PNG: a JPG source renders noticeably faster.
 - edit_image(prompt, source_image, [reference_image], steps) — edit by path.
@@ -261,7 +263,7 @@ Rules:
 - The user gave a file path directly → use it as-is, without list_images.
 - If the image still never appears in the inbox → ask the user to put it into
   ~/comfy_edit_inbox and call list_images again.
-- Before edit_image, shrink a large PNG source (> ~3 MB): convert_image(paths, "jpg", 90) →
+- Before edit_image, shrink a large source (> ~3 MB or > 2000 px): convert_image(paths, "jpg", 90, 1920) →
   use the converted path. Final images are usually requested as JPG too — convert the
   result with the same tool.
 - "Enhance/upscale/make bigger" → upscale_image; use longer_size when the user names a
