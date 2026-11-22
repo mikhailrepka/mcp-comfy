@@ -367,39 +367,53 @@ def _watch_user_files_loop():
         except Exception as e:
             print(f"[watch] init error: {e}", flush=True)
 
+    import fcntl
+
     while True:
         try:
             if os.path.isdir(LM_FILES_DIR):
-                new_seen = []
-                for f in sorted(os.listdir(LM_FILES_DIR)):
-                    if f in seen or f.lower().endswith((".metadata.json", ".json")):
-                        continue
-                    if not f.lower().endswith(IMAGE_EXTS):
-                        continue
-                    src = os.path.join(LM_FILES_DIR, f)
-                    if not os.path.isfile(src):
-                        continue
-                    # не копируем файл, который ещё пишется
+                # атомарный claim: под файловой блокировкой перечитываем seen
+                # (могут работать несколько инстансов сервера) и добавляем новые
+                with open(SEEN_STATE, "a+") as fh:
+                    fcntl.flock(fh, fcntl.LOCK_EX)
+                    fh.seek(0)
                     try:
-                        if time.time() - os.path.getmtime(src) < 2:
+                        seen = set(json.load(fh))
+                    except Exception:
+                        seen = set()
+                    copied = []
+                    for f in sorted(os.listdir(LM_FILES_DIR)):
+                        if f in seen or f.lower().endswith((".metadata.json", ".json")):
                             continue
-                    except OSError:
-                        continue
+                        if not f.lower().endswith(IMAGE_EXTS):
+                            continue
+                        src_path = os.path.join(LM_FILES_DIR, f)
+                        if not os.path.isfile(src_path):
+                            continue
+                        # не копируем файл, который ещё пишется
+                        try:
+                            if time.time() - os.path.getmtime(src_path) < 2:
+                                continue
+                        except OSError:
+                            continue
+                        seen.add(f)
+                        copied.append((f, src_path))
+                    fh.seek(0)
+                    fh.truncate()
+                    json.dump(sorted(seen), fh)
+                    fcntl.flock(fh, fcntl.LOCK_UN)
+                for f, src_path in copied:
                     orig = _original_name(f)
                     base = _sanitize_name(orig) if orig else _sanitize_name(f)
                     dst = os.path.join(INBOX_DIR, f"chat_{base}")
                     n = 1
                     while os.path.exists(dst):
-                        root, ext = os.path.splitext(f"chat_{base}")
-                        dst = os.path.join(INBOX_DIR, f"{root}_{n}{ext}")
+                        root_, ext_ = os.path.splitext(f"chat_{base}")
+                        dst = os.path.join(INBOX_DIR, f"{root_}_{n}{ext_}")
                         n += 1
                     import shutil
-                    shutil.copy2(src, dst)
-                    seen.add(f)
-                    new_seen.append(f)
-                if new_seen:
-                    with open(SEEN_STATE, "w") as fh:
-                        json.dump(sorted(seen), fh)
+                    shutil.copy2(src_path, dst)
+                    print(f"[watch] copied {f} -> {dst}", flush=True)
         except Exception as e:
             print(f"[watch] user-files scan error: {e}", flush=True)
         time.sleep(WATCH_INTERVAL)
