@@ -57,7 +57,7 @@ $VenvPython = Join-Path $Dir ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
     Invoke-Expression "$Py -m venv `"$Dir\.venv`""
 }
-& $VenvPython -m pip install -q "mcp<2" websocket-client Pillow trimesh
+& $VenvPython -m pip install -q "mcp<2" websocket-client Pillow trimesh matplotlib
 if ($LASTEXITCODE -ne 0) { Write-Error "pip install failed" }
 Write-Host "venv ready: $Dir\.venv"
 

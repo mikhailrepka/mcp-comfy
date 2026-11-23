@@ -50,7 +50,7 @@ echo "Python: $PY ($($PY --version))"
 if [ ! -x "$DIR/.venv/bin/python" ]; then
   "$PY" -m venv "$DIR/.venv"
 fi
-"$DIR/.venv/bin/python" -m pip install -q "mcp<2" websocket-client Pillow trimesh
+"$DIR/.venv/bin/python" -m pip install -q "mcp<2" websocket-client Pillow trimesh matplotlib
 echo "venv готов: $DIR/.venv"
 
 # 3. адрес ComfyUI -> local.env (untracked) + VERSION (короткий коммит).

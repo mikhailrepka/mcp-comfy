@@ -244,11 +244,78 @@ def _convert_3d(path, formats):
     return out
 
 
+def _render_previews(path, max_faces=20000):
+    """2-3 ракурса меша в PNG (matplotlib, чистый CPU — без GPU/GL).
+    Сложности matplotlib-3D, которые здесь обходятся:
+    - нет z-буфера → сортируем грани сами (painter's algorithm относительно камеры);
+    - случайный субсэмпл граней даёт «дырявую» кашу → quadric-децимация
+      (fast_simplification), сохраняет силуэт; фолбэк — субсэмпл;
+    - освещение считаем относительно камеры каждого ракурса.
+    Грани редуцируются до max_faces: 144k лиц тормозят, 20k визуально то же.
+    -> [path_png]; ошибки не роняют задачу (превью — бонус)."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")  # без дисплея
+        import numpy as np
+        import trimesh
+        mesh = trimesh.load(path, force="mesh")
+        if len(mesh.faces) > max_faces:
+            try:
+                mesh = mesh.simplify_quadric_decimation(face_count=max_faces)
+            except Exception:
+                idx = np.random.default_rng(0).choice(len(mesh.faces), max_faces,
+                                                      replace=False)
+                mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces[idx])
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+        # glTF хранит модели Y-up; ракурсы ниже заданы для Z-up — поворачиваем
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(
+            np.pi / 2, [1, 0, 0]))
+        base = os.path.splitext(path)[0]
+        out = []
+        for elev, azim, tag in ((25, -60, "iso"), (5, -90, "front"), (5, 90, "side")):
+            el, az = np.radians(elev), np.radians(azim)
+            cam_dir = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az),
+                                np.sin(el)])
+            # свет — от камеры и чуть сверху
+            light = cam_dir + np.array([0.0, 0.0, 0.7])
+            light = light / np.linalg.norm(light)
+            lam = 0.3 + 0.7 * np.clip(mesh.face_normals @ light, 0.0, 1.0)
+            colors = np.stack([0.45 * lam, 0.58 * lam, 0.85 * lam,
+                               np.ones_like(lam)], axis=1).clip(0, 1)
+            # painter's algorithm: дальние грани раньше ближних
+            centroids = mesh.vertices[mesh.faces].mean(axis=1)
+            dist = centroids @ cam_dir  # чем больше — тем дальше от камеры
+            order = np.argsort(-dist)
+            tri = mesh.vertices[mesh.faces][order]
+            png = f"{base}_preview_{tag}.png"
+            fig = plt.figure(figsize=(4, 4), dpi=110)
+            ax = fig.add_subplot(111, projection="3d")
+            ax.add_collection3d(Poly3DCollection(
+                tri, facecolors=colors[order], edgecolor="none", zsort="min"))
+            c = mesh.bounds.mean(axis=0)
+            r = (mesh.extents.max() or 1.0) * 0.6
+            ax.set_xlim(c[0] - r, c[0] + r); ax.set_ylim(c[1] - r, c[1] + r)
+            ax.set_zlim(c[2] - r, c[2] + r)
+            ax.set_axis_off()
+            ax.view_init(elev=elev, azim=azim)
+            fig.tight_layout(pad=0)
+            fig.savefig(png, bbox_inches="tight")
+            plt.close(fig)
+            out.append(png)
+        return out
+    except Exception as e:
+        print(f"[3d] preview render failed (non-fatal): {e}", flush=True)
+        return []
+
+
 def _content_for_result(job: dict) -> list:
     if job["status"] == "done":
         seed_note = f"\nSeed: {job['seed']}" if job.get("seed") is not None else ""
-        # GLB не инлайним (не картинка) — отдаём путь и факты о меше
+        # GLB не инлайним (не картинка): рендерим превью-ракурсы в PNG —
+        # daemon подхватит строки "3D preview:" и отправит их в чат как картинки
         note = ""
+        preview_lines = ""
         try:
             import trimesh
             mesh = trimesh.load(job["path"], force="mesh")
@@ -256,10 +323,13 @@ def _content_for_result(job: dict) -> list:
             note = (f" ({len(mesh.faces)} faces, "
                     f"{'watertight' if mesh.is_watertight else 'NOT watertight'}, "
                     f"bounds {mesh.extents.round(2).tolist()})")
-        except Exception:
-            pass
+            previews = _render_previews(job["path"])
+            if previews:
+                preview_lines = "\n" + "\n".join(f"3D preview: {p}" for p in previews)
+        except Exception as e:
+            print(f"[3d] result annotation failed (non-fatal): {e}", flush=True)
         return [TextContent(type="text",
-                text=f"3D model ready: {job['path']}{note}{seed_note}\n"
+                text=f"3D model ready: {job['path']}{note}{seed_note}{preview_lines}\n"
                      f"Convert it with convert_3d if the user needs STL/OBJ.")]
     return [TextContent(type="text", text=f"3D generation failed: {job['error']}")]
 

@@ -66,7 +66,7 @@ $VenvPython = Join-Path $Dir ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
     Write-Error ".venv not found - run installer/install.ps1 first (creates venv and registers mcp.json)."
 }
-& $VenvPython -m pip install -q "mcp<2" websocket-client Pillow trimesh
+& $VenvPython -m pip install -q "mcp<2" websocket-client Pillow trimesh matplotlib
 if ($LASTEXITCODE -ne 0) { Write-Host "WARNING: pip sync failed - check manually" }
 
 if (-not $NoKill) {
