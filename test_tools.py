@@ -66,12 +66,16 @@ class ComfyStatusTests(unittest.TestCase):
 class CancelJobTests(unittest.TestCase):
 
     def _with_jobs(self, job_id, record):
-        """Подменяет локальный jobs-реестр на время теста."""
+        """Подменяет локальный jobs-реестр на время теста + глушит jobstore.put
+        (иначе тесты пишут мусор в общий ~/.comfy_mcp_jobs.json)."""
         old = gen.jobs.get(job_id)
         gen.jobs[job_id] = record
         self.addCleanup(gen.jobs.pop, job_id, None)
         if old is not None:  # pragma: no cover
             gen.jobs[job_id] = old
+        put = mock.patch.object(gen.jobstore, "put", return_value=None)
+        put.start()
+        self.addCleanup(put.stop)
 
     def test_unknown_job(self):
         with mock.patch("urllib.request.urlopen") as url:
@@ -265,6 +269,56 @@ class BatchTests(unittest.TestCase):
             content = gen._foreign_check("job_9")
         imgs = [i for i in content if getattr(i, "type", None) == "image"]
         self.assertEqual(len(imgs), 2)
+
+
+class PcResolveTests(unittest.TestCase):
+    """Цепочка PC: env COMFY_PC_URL -> local.env -> дефолт."""
+
+    def test_default_without_env_and_file(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(gen._resolve_pc(env_file="/nonexistent/local.env"),
+                             "http://192.168.1.218:8188")
+
+    def test_env_file_value(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        p = os.path.join(tmp, "local.env")
+        with open(p, "w") as fh:
+            fh.write("# comment\nCOMFY_PC_URL=http://10.0.0.5:8188\n")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(gen._resolve_pc(env_file=p), "http://10.0.0.5:8188")
+
+    def test_env_wins_over_file(self):
+        with mock.patch.dict(os.environ, {"COMFY_PC_URL": "http://10.0.0.9:8188"}):
+            self.assertEqual(gen._resolve_pc(env_file="/nonexistent/local.env"),
+                             "http://10.0.0.9:8188")
+
+    def test_trailing_slash_stripped(self):
+        self.assertEqual(gen._resolve_pc(env_value="http://x:8188/", env_file="/no"),
+                         "http://x:8188")
+
+    def test_quotes_stripped_in_env_file(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        p = os.path.join(tmp, "local.env")
+        with open(p, "w") as fh:
+            fh.write('COMFY_PC_URL="http://10.0.0.7:8188"\n')
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(gen._resolve_pc(env_file=p), "http://10.0.0.7:8188")
+
+
+class InstallVersionTests(unittest.TestCase):
+    """comfy_status печатает версию установки из файла VERSION."""
+
+    def test_missing_file_reports_unknown(self):
+        self.assertEqual(gen._install_version("/nonexistent-dir"), "unknown")
+
+    def test_version_file_read(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with open(os.path.join(tmp, "VERSION"), "w") as fh:
+            fh.write("abc1234\n")
+        self.assertEqual(gen._install_version(tmp), "abc1234")
 
 
 if __name__ == "__main__":
