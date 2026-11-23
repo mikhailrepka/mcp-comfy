@@ -178,8 +178,6 @@ class RemoveBackgroundTests(unittest.TestCase):
         self.assertIn("Remove the background completely", captured["prompt"])
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class McpRegistrationTests(unittest.TestCase):
@@ -192,3 +190,19 @@ class McpRegistrationTests(unittest.TestCase):
         tools = asyncio.run(srv3d.app.list_tools())
         self.assertEqual([t.name for t in tools],
                          ["generate_3d", "check_image", "convert_3d"])
+
+
+class McpRegistrationTests(unittest.TestCase):
+    """list_tools зарегистрирован декоратором — LM Studio падал с 'Method not
+    found' (-32601), когда декоратор отсутствовал (функции работали, тесты
+    звали их напрямую и не ловили)."""
+
+    def test_list_tools_registered(self):
+        import asyncio
+        tools = asyncio.run(srv3d.app.list_tools())
+        self.assertEqual([t.name for t in tools],
+                         ["generate_3d", "check_image", "convert_3d"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
