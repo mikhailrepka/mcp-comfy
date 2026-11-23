@@ -50,9 +50,42 @@ def _resolve_pc(env_value=None, env_file=None):
 
 PC = _resolve_pc()
 WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nvidia-image-gen.json")
+def _read_local_env(env_file=None):
+    """KEY=VALUE из local.env рядом с сервером (без env-переопределений)."""
+    env_file = env_file or os.path.join(os.path.dirname(os.path.abspath(__file__)), "local.env")
+    out = {}
+    try:
+        with open(env_file) as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, _, v = line.partition("=")
+                    out[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return out
+
+
+def _cfg_int(name, default):
+    v = os.environ.get(name)
+    if not v or not v.strip():
+        v = _read_local_env().get(name)
+    try:
+        return int(v) if v else default
+    except ValueError:
+        return default
+
+
 OUTPUT_DIR = os.path.expanduser("~/comfy_images")
-FAST_WAIT = 90        # сколько generate_image ждёт результат сама, секунд
-CHECK_WAIT = 600      # сколько check_image ждёт максимум, секунд
+# Сколько generate_image держит tool-вызов открытым, ждёт результат инлайн.
+# КРИТИЧНО: LM Studio-клиент убивает MCP-вызов по своему таймауту (~60 с) —
+# если инлайн-ожидание длиннее, модель получает -32001 БЕЗ job_id и плодит
+# дубликаты. Дефолт безопасен для прямых вызовов из LM Studio; чат-боту хватает,
+# его check_image-цикл добирает результат куска́ми. Переопределяется
+# env COMFY_FAST_WAIT или local.env.
+FAST_WAIT = _cfg_int("COMFY_FAST_WAIT", 25)
+CHECK_WAIT = 600      # фоновый дедлайн задачи (_run_job), не связан с таймаутом клиента
+CHECK_WAIT_INLINE = _cfg_int("COMFY_CHECK_WAIT", 30)  # один вызов check_image (сек)
 POLL_INTERVAL = 1     # период опроса /history
 
 app = Server("comfy-image-gen")
@@ -220,7 +253,7 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="generate_image",
             description="Generate an image from a text prompt using ComfyUI on the remote PC. "
-                        "Usually returns the finished image inline within ~90 seconds; "
+                        "Usually returns the finished image inline within ~25 seconds; "
                         "if it is still rendering, returns a job_id — then call check_image "
                         "with that job_id to get the image.",
             inputSchema={
@@ -268,7 +301,8 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="check_image",
             description="Check a pending image generation job and return the image when ready. "
-                        "Call with the job_id returned by generate_image.",
+                        "Call with the job_id returned by generate_image. Waits up to ~30 s "
+                        "per call; if still rendering, call again until the image arrives.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -358,7 +392,7 @@ async def call_tool(name: str, arguments: dict) -> list:
         if job_id not in jobs:
             # задача могла быть создана другим comfy-mcp сервером — смотрим общий реестр
             return _foreign_check(job_id)
-        deadline = time.time() + CHECK_WAIT
+        deadline = time.time() + min(int(arguments.get("wait", CHECK_WAIT_INLINE)), CHECK_WAIT_INLINE)
         while time.time() < deadline:
             await asyncio.sleep(POLL_INTERVAL)
             if jobs[job_id]["status"] != "queued":

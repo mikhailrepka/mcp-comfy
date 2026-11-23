@@ -5,6 +5,16 @@ are documented here. The file is written in reverse chronological order.
 
 ## 2026-11-24
 
+### Fixed
+
+- **gen server: inline waits are now LM-Studio-safe** (`COMFY_FAST_WAIT` default 25 s,
+  `COMFY_CHECK_WAIT` default 30 s per check_image call; env or local.env). Previously
+  generate_image held the tool call up to 90 s and check_image up to 600 s — longer
+  than the LM Studio MCP client timeout (~60 s), so the client killed the call with
+  -32001 BEFORE the job_id reached the model; the model then saw an empty queue and
+  resubmitted duplicates. Batch renders (n=3, 1024px) pushed past the window; single
+  turbo renders used to fit. The background job deadline (600 s) is unchanged.
+
 ### Added
 
 - **3D generation** (`comfy-image-3d` server, new): `generate_3d` — Hunyuan3D v2
