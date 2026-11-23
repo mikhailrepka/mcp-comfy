@@ -197,5 +197,75 @@ class SeedTests(unittest.TestCase):
         self.assertEqual(texts[0], "Image generated: /x/y.png")
 
 
+class BatchTests(unittest.TestCase):
+    """n>1: batch_size в payload, мультифайл fetch, мульти-контент, foreign_check."""
+
+    def _capture_submit(self, *args, **kw):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["data"] = json.loads(req.data.decode())
+            return _resp(b'{"prompt_id": "test-pid"}')
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            gen._submit(*args, **kw)
+        return captured["data"]["prompt"]["57:13"]["inputs"]["batch_size"]
+
+    def test_batch_size_passthrough(self):
+        self.assertEqual(self._capture_submit("p", 512, 512, 8, 1, n=3), 3)
+
+    def test_batch_size_clamped_to_4(self):
+        self.assertEqual(self._capture_submit("p", 512, 512, 8, 1, n=99), 4)
+
+    def test_fetch_image_multi_and_single(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+
+        def _hist(count):
+            return {"pid": {"outputs": {"9": {"images": [
+                {"filename": f"v{i}.png", "subfolder": "", "type": "output"}
+                for i in range(count)]}}}}
+
+        for count, expected in ((2, [b"AAA", b"BBB"]), (1, [b"AAA"])):
+            with mock.patch.object(gen, "OUTPUT_DIR", tmp), \
+                    mock.patch.object(gen, "_history", return_value=_hist(count)), \
+                    mock.patch("urllib.request.urlopen",
+                               side_effect=[_resp(b"AAA"), _resp(b"BBB")]):
+                res = gen._fetch_image("pid")
+            self.assertEqual([d for _, d in res], expected)
+            self.assertEqual([p for p, _ in res],
+                             [os.path.join(tmp, f"v{i}.png") for i in range(count)])
+
+    def test_content_batch_three_images(self):
+        job = {"status": "done", "paths": ["/a/1.png", "/a/2.png", "/a/3.png"],
+               "data": [b"\x89P1", b"\x89P2", b"\x89P3"], "seed": 7}
+        content = gen._content_for_result(job)
+        imgs = [i for i in content if getattr(i, "type", None) == "image"]
+        texts = [i.text for i in content if getattr(i, "type", None) == "text"]
+        self.assertEqual(len(imgs), 3)
+        self.assertEqual(texts[0].count("Image generated:"), 3)
+        self.assertTrue(texts[0].startswith("Image generated: /a/1.png"))
+        self.assertTrue(texts[0].endswith("Seed: 7"))
+
+    def test_content_single_legacy_record(self):
+        # регресс: старая форма записи {path, data (bytes)} — как в jobstore у одиночных
+        content = gen._content_for_result(
+            {"status": "done", "path": "/x/y.png", "data": b"\x89PNG", "seed": 42})
+        imgs = [i for i in content if getattr(i, "type", None) == "image"]
+        self.assertEqual(len(imgs), 1)
+
+    def test_foreign_check_batch_returns_all(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        p1, p2 = os.path.join(tmp, "1.png"), os.path.join(tmp, "2.png")
+        for p, data in ((p1, b"P1"), (p2, b"P2")):
+            open(p, "wb").write(data)
+        rec = {"status": "done", "path": p1, "paths": [p1, p2], "seed": 3}
+        with mock.patch.object(gen.jobstore, "get", return_value=rec):
+            content = gen._foreign_check("job_9")
+        imgs = [i for i in content if getattr(i, "type", None) == "image"]
+        self.assertEqual(len(imgs), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

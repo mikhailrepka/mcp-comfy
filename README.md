@@ -235,9 +235,11 @@ Paste into the model settings (System Prompt) or Project Rules:
 
 ```
 You have image tools from the comfy-image-gen, comfy-image-edit and comfy-image-upscale MCP servers:
-- generate_image(prompt, width, height, steps, [seed]) — a new image from scratch. Optional
+- generate_image(prompt, width, height, steps, [seed], [n]) — a new image from scratch. Optional
   seed fixes randomness (iterate on a previous result); the used seed is returned on a
-  separate "Seed: N" line.
+  separate "Seed: N" line. Optional n (1-4) renders that many variants in ONE job (same
+  prompt, different noise) — check_image returns all of them; use when the user asks for
+  options to choose from (4 variants take ~4x VRAM).
 - edit_image(prompt, source_image, [reference_image], steps, [seed]) — edit by path.
   Returns a job_id immediately ("task accepted"). Optional seed reproduces an edit.
 - comfy_status() — check the ComfyUI PC (remote render server): reachable, GPU/VRAM, RAM,
@@ -264,6 +266,9 @@ You have image tools from the comfy-image-gen, comfy-image-edit and comfy-image-
 
 Rules:
 - "Draw/generate" → generate_image.
+- The user asks for several variants/options ("give me a few to choose from") →
+  generate_image with n=2..4 in ONE call instead of several separate jobs; all variants
+  arrive after check_image.
 - If comfy_status says the PC is unreachable → the PC is probably asleep: tell the user
   to wake it up and do not retry blindly. If the queue shows running/pending jobs, new
   jobs will wait — mention it instead of resubmitting duplicates.

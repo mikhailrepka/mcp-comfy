@@ -40,13 +40,15 @@ CLIENT_ID = f"mcp_gen_{random.randint(0, 10**10)}"
 ws_progress = {}  # prompt_id -> {"value": int, "max": int} из websocket-событий ComfyUI
 
 
-def _submit(prompt: str, width: int, height: int, steps: int, seed=None) -> tuple:
+def _submit(prompt: str, width: int, height: int, steps: int, seed=None, n: int = 1) -> tuple:
     """Ставит задачу в очередь. Возвращает (prompt_id, seed)."""
     with open(WORKFLOW) as f:
         wf = json.load(f)
     wf["57:27"]["inputs"]["text"] = prompt
     wf["57:13"]["inputs"]["width"] = width
     wf["57:13"]["inputs"]["height"] = height
+    # варианты за один рендер: один prompt_id, SaveImage отдаёт N файлов
+    wf["57:13"]["inputs"]["batch_size"] = max(1, min(int(n), 4))
     if seed is None:
         seed = random.randint(0, 2 ** 32)
     wf["57:3"]["inputs"]["seed"] = int(seed)
@@ -78,30 +80,33 @@ def _error_from_history(hist: dict, prompt_id: str):
 
 
 def _fetch_image(prompt_id: str):
-    """Возвращает (path, bytes) если картинка готова, иначе None."""
+    """Возвращает [(path, bytes), ...] если картинки готовы (батч отдаёт N файлов), иначе None."""
     hist = _history(prompt_id)
     if prompt_id not in hist:
         return None
     imgs = hist[prompt_id]["outputs"].get("9", {}).get("images", [])
     if not imgs:
         return None
-    img = imgs[0]
-    params = urllib.parse.urlencode({
-        "filename": img["filename"],
-        "subfolder": img["subfolder"],
-        "type": img["type"],
-    })
-    data = urllib.request.urlopen(f"{PC}/view?{params}", timeout=60).read()
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    out = os.path.join(OUTPUT_DIR, img["filename"])
-    with open(out, "wb") as fh:
-        fh.write(data)
-    return out, data
+    results = []
+    for img in imgs:
+        params = urllib.parse.urlencode({
+            "filename": img["filename"],
+            "subfolder": img["subfolder"],
+            "type": img["type"],
+        })
+        data = urllib.request.urlopen(f"{PC}/view?{params}", timeout=60).read()
+        out = os.path.join(OUTPUT_DIR, img["filename"])
+        with open(out, "wb") as fh:
+            fh.write(data)
+        results.append((out, data))
+    return results
 
 
-def _run_job(prompt: str, width: int, height: int, steps: int, job_id: str, seed=None):
+def _run_job(prompt: str, width: int, height: int, steps: int, job_id: str,
+             seed=None, n: int = 1):
     try:
-        pid, seed = _submit(prompt, width, height, steps, seed)
+        pid, seed = _submit(prompt, width, height, steps, seed, n)
         jobs[job_id]["prompt_id"] = pid
         jobs[job_id]["seed"] = seed
         jobstore.put(job_id, {"status": "queued", "prompt_id": pid, "seed": seed})
@@ -116,8 +121,11 @@ def _run_job(prompt: str, width: int, height: int, steps: int, job_id: str, seed
                 return
             res = _fetch_image(pid)
             if res:
-                jobs[job_id] = {"status": "done", "path": res[0], "data": res[1], "seed": seed}
-                jobstore.put(job_id, {"status": "done", "path": res[0], "seed": seed})
+                paths = [p for p, _ in res]
+                jobs[job_id] = {"status": "done", "path": paths[0], "paths": paths,
+                                "data": [d for _, d in res], "seed": seed}
+                jobstore.put(job_id, {"status": "done", "path": paths[0], "paths": paths,
+                                      "seed": seed})
                 return
             pr = ws_progress.get(pid)
             if pr and pr != jobs[job_id].get("progress"):
@@ -165,13 +173,18 @@ def _ws_listen_loop():
 def _content_for_result(job: dict) -> list:
     content = []
     if job["status"] == "done":
-        content.append(ImageContent(
-            type="image",
-            data=base64.b64encode(job["data"]).decode(),
-            mimeType="image/png",
-        ))
+        paths = job.get("paths") or [job["path"]]
+        raw = job.get("data")
+        datas = raw if isinstance(raw, list) else [raw]
+        for p, d in zip(paths, datas):
+            content.append(ImageContent(
+                type="image",
+                data=base64.b64encode(d).decode(),
+                mimeType="image/png",
+            ))
         seed_note = f"\nSeed: {job['seed']}" if job.get("seed") is not None else ""
-        content.append(TextContent(type="text", text=f"Image generated: {job['path']}{seed_note}"))
+        text = "\n".join(f"Image generated: {p}" for p in paths)
+        content.append(TextContent(type="text", text=f"{text}{seed_note}"))
     else:
         content.append(TextContent(type="text", text=f"Generation failed: {job['error']}"))
     return content
@@ -207,6 +220,16 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "Number of sampling steps; more = more detail, slower. Default 8.",
                         "default": 8,
+                    },
+                    "n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 4,
+                        "description": "Number of variants in ONE render (same prompt, different "
+                                       "noise) — one job_id, check_image returns all images. "
+                                       "Use when the user asks for options/variants to choose "
+                                       "from. Default 1. Note: 4 variants take ~4x VRAM.",
+                        "default": 1,
                     },
                     "seed": {
                         "type": "integer",
@@ -286,10 +309,12 @@ async def call_tool(name: str, arguments: dict) -> list:
         steps = int(arguments.get("steps", 8))
         seed = arguments.get("seed")
         seed = int(seed) if seed is not None else None
+        n = int(arguments.get("n", 1))
         job_id = f"job_{random.randint(0, 10**8)}"
         jobs[job_id] = {"status": "queued"}
         loop = asyncio.get_event_loop()
-        threading.Thread(target=_run_job, args=(prompt, width, height, steps, job_id, seed),
+        threading.Thread(target=_run_job,
+                         args=(prompt, width, height, steps, job_id, seed, n),
                          daemon=True).start()
 
         # короткое быстрое ожидание: если turbo успел — вернём инлайн
@@ -338,7 +363,11 @@ def _foreign_check(job_id: str) -> list:
                      f"start a new task.")]
     status = rec.get("status")
     if status == "done":
-        return _image_file_content(rec["path"], rec.get("seed"))
+        # батч-задачи несут список путей — отдаём все картинки
+        content = []
+        for p in (rec.get("paths") or [rec["path"]]):
+            content.extend(_image_file_content(p, rec.get("seed")))
+        return content
     if status == "error":
         return [TextContent(type="text", text=f"Task failed: {rec.get('error')}")]
     pr = rec.get("progress")

@@ -7,6 +7,11 @@ are documented here. The file is written in reverse chronological order.
 
 ### Added
 
+- **`n` variants in one generation** for `generate_image` (batch_size on the latent
+  node, 1–4): one `job_id`, `check_image` returns ALL images of the batch, and the
+  result text lists every path (`Image generated: ...` per line). The chat-bot daemon
+  now pairs image #i with path #i from the result text — the previous code took the
+  FIRST path for every image, which would have sent identical copies for batches.
 - **`comfy_status`** tool (comfy_mcp_server): check the ComfyUI PC before
   submitting work — reachability, GPU/VRAM, RAM and the render queue. Returns a
   human-readable diagnosis instead of a cryptic "No route to host" when the PC
