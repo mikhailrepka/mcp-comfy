@@ -187,7 +187,12 @@ class McpRegistrationTests(unittest.TestCase):
 
     def test_list_tools_registered(self):
         import asyncio
-        tools = asyncio.run(srv3d.app.list_tools())
+        # декоратор регистрирует обработчик tools/list в Server — без него
+        # LM Studio отвечает '-32601: Method not found'
+        names = [t.__name__ for t in srv3d.app.request_handlers]
+        self.assertIn("ListToolsRequest", names)
+        self.assertIn("CallToolRequest", names)
+        tools = asyncio.run(srv3d.list_tools())
         self.assertEqual([t.name for t in tools],
                          ["generate_3d", "check_image", "convert_3d"])
 
@@ -199,7 +204,12 @@ class McpRegistrationTests(unittest.TestCase):
 
     def test_list_tools_registered(self):
         import asyncio
-        tools = asyncio.run(srv3d.app.list_tools())
+        # декоратор регистрирует обработчик tools/list в Server — без него
+        # LM Studio отвечает '-32601: Method not found'
+        names = [t.__name__ for t in srv3d.app.request_handlers]
+        self.assertIn("ListToolsRequest", names)
+        self.assertIn("CallToolRequest", names)
+        tools = asyncio.run(srv3d.list_tools())
         self.assertEqual([t.name for t in tools],
                          ["generate_3d", "check_image", "convert_3d"])
 
