@@ -267,9 +267,11 @@ You have image tools from the comfy-image-gen, comfy-image-edit and comfy-image-
   whether the PC is busy or asleep, or when diagnosing repeated failures.
 - cancel_job(job_id) — stop a queued or running render (job_id from any of the three task
   tools) when the user asks to cancel/stop. Finished jobs cannot be cancelled.
-- list_results(limit) — recent outputs in ~/comfy_images (generated/edited/upscaled),
+- list_results(limit, [inline]) — recent outputs in ~/comfy_images (generated/edited/upscaled),
   newest first. Use when the user refers to an earlier result without giving a path;
   then pass the listed path to edit_image / upscale_image / convert_image.
+  inline=true attaches the newest images (up to 4) to the answer — use when the user
+  asks to SEE recent results (e.g. "show me what you made yesterday").
 - list_images() — images in the inbox folder (~/comfy_edit_inbox), newest first.
 - convert_image(paths, format, quality, max_width, max_height) — convert to jpg/png/webp (quality 1-100,
   default 90), optionally downscale (e.g. max_width=1920 for phone photos);

@@ -16,6 +16,7 @@ import os
 import random
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -108,7 +109,34 @@ def _submit(source_name, multiplier, longer_size, scale_method):
         data=json.dumps({"prompt": wf, "client_id": CLIENT_ID}).encode(),
         headers={"Content-Type": "application/json"},
     )
-    return json.loads(urllib.request.urlopen(req, timeout=30).read())["prompt_id"]
+    try:
+        return json.loads(urllib.request.urlopen(req, timeout=30).read())["prompt_id"]
+    except urllib.error.HTTPError as e:
+        # причина отказа валидации лежит в теле ответа — без этого клиент видит
+        # только "HTTP Error 400" и не может понять, что не так
+        raise RuntimeError(_prompt_error_text(e)) from None
+
+
+def _prompt_error_text(e):
+    """Читаемое описание отказа /prompt из тела 400 (error + node_errors)."""
+    try:
+        body = json.loads(e.read().decode())
+    except Exception:
+        return f"ComfyUI rejected the prompt: HTTP {e.code}"
+    parts = []
+    err = body.get("error") or {}
+    if err.get("message"):
+        parts.append(str(err["message"]))
+    for nid, ne in (body.get("node_errors") or {}).items():
+        if not isinstance(ne, dict):
+            continue
+        for d in ne.get("errors", []):
+            msg = d.get("message", "?")
+            det = d.get("details", "")
+            parts.append(f"node {nid}: {msg}" + (f" — {det}" if det else ""))
+    if not parts:
+        return f"ComfyUI rejected the prompt: HTTP {e.code}"
+    return "ComfyUI rejected the prompt: " + "; ".join(parts)
 
 
 def _history(prompt_id):

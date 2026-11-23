@@ -13,6 +13,7 @@ import base64
 import json
 import os
 import random
+import re
 import threading
 import time
 import urllib.parse
@@ -115,7 +116,34 @@ def _submit(prompt: str, width: int, height: int, steps: int, seed=None, n: int 
         data=json.dumps({"prompt": wf, "client_id": CLIENT_ID}).encode(),
         headers={"Content-Type": "application/json"},
     )
-    return json.loads(urllib.request.urlopen(req, timeout=30).read())["prompt_id"], seed
+    try:
+        return json.loads(urllib.request.urlopen(req, timeout=30).read())["prompt_id"], seed
+    except urllib.error.HTTPError as e:
+        # причина отказа валидации лежит в теле ответа — без этого клиент видит
+        # только "HTTP Error 400" и не может понять, что не так
+        raise RuntimeError(_prompt_error_text(e)) from None
+
+
+def _prompt_error_text(e):
+    """Читаемое описание отказа /prompt из тела 400 (error + node_errors)."""
+    try:
+        body = json.loads(e.read().decode())
+    except Exception:
+        return f"ComfyUI rejected the prompt: HTTP {e.code}"
+    parts = []
+    err = body.get("error") or {}
+    if err.get("message"):
+        parts.append(str(err["message"]))
+    for nid, ne in (body.get("node_errors") or {}).items():
+        if not isinstance(ne, dict):
+            continue
+        for d in ne.get("errors", []):
+            msg = d.get("message", "?")
+            det = d.get("details", "")
+            parts.append(f"node {nid}: {msg}" + (f" — {det}" if det else ""))
+    if not parts:
+        return f"ComfyUI rejected the prompt: HTTP {e.code}"
+    return "ComfyUI rejected the prompt: " + "; ".join(parts)
 
 
 def _history(prompt_id: str) -> dict:
@@ -343,10 +371,18 @@ async def list_tools() -> list[Tool]:
             description="List recent result images in ~/comfy_images (generated/edited/upscaled "
                         "outputs, newest first). Use when the user refers to an earlier result "
                         "without giving a path; then pass the listed path to edit_image, "
-                        "upscale_image or convert_image.",
+                        "upscale_image or convert_image. With inline=true the newest images "
+                        "(up to 4) are attached to the answer as images — use when the user "
+                        "asks to SEE recent results.",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "inline": {
+                        "type": "boolean",
+                        "description": "Attach the newest images (up to 4) to the answer "
+                                       "inline. Default false.",
+                        "default": False,
+                    },
                     "limit": {
                         "type": "integer",
                         "description": "How many entries to show (1-50). Default 10.",
@@ -407,7 +443,39 @@ async def call_tool(name: str, arguments: dict) -> list:
 
     if name == "list_results":
         limit = int(arguments.get("limit", 10))
-        return [TextContent(type="text", text=_list_results_text(limit))]
+        inline = bool(arguments.get("inline", False))
+        text = _list_results_text(limit)
+        if not inline:
+            return [TextContent(type="text", text=text)]
+        # инлайн: первые N файлов (кап 4 — base64 раздувает ответ) прикладываются
+        # как ImageContent — LM Studio показывает их под tool-call'ом, бот шлёт
+        # в чат через свой пайплайн (строки "Image ready:" в его regex)
+        paths = []
+        for ln in text.splitlines():
+            m = re.search(r"\S+\.(?:png|jpe?g|webp)", ln, re.I)
+            if m and m.group(0) not in paths:
+                paths.append(m.group(0))
+        inline_paths = [p for p in paths if os.path.isfile(p)][:4]
+        content = []
+        for p in inline_paths:
+            try:
+                mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}.get(
+                    p.rsplit(".", 1)[-1].lower(), "image/png")
+                with open(p, "rb") as fh:
+                    data = fh.read()
+                content.append(ImageContent(
+                    type="image", data=base64.b64encode(data).decode(), mimeType=mime))
+            except Exception as e:
+                print(f"[list_results] inline skip {p}: {e}", flush=True)
+                inline_paths.remove(p)
+        lines = [f"Recent results ({len(inline_paths)} attached inline, "
+                 f"{max(0, len(paths) - len(inline_paths))} more as paths below):"]
+        lines += [f"Image ready: {p}" for p in inline_paths]
+        rest = [ln for ln in text.splitlines() if ln.startswith(("20", "(+"))]
+        lines += rest
+        lines.append("Attached images correspond to the first 'Image ready' paths in order.")
+        content.append(TextContent(type="text", text="\n".join(lines)))
+        return content
 
     raise ValueError(f"Unknown tool: {name}")
 

@@ -7,6 +7,11 @@ are documented here. The file is written in reverse chronological order.
 
 ### Added
 
+- **`list_results` gains `inline`** (default false): when true, the newest images
+  (capped at 4) are attached to the answer as ImageContent — LM Studio shows them
+  under the tool call, the chat-bot delivers them to chat via its existing pipeline
+  (the inlined files are listed with "Image ready:" lines that its pairing regex
+  understands).
 - **`repair_3d`** tool (comfy-image-3d): fix NOT-watertight meshes for 3D printing via
   voxel remeshing (mesh -> filled voxel grid -> marching cubes, scikit-image) —
   GUARANTEED watertight output, original scale/position preserved; `resolution`
@@ -18,6 +23,9 @@ are documented here. The file is written in reverse chronological order.
 
 ### Fixed
 
+- **gen + upscale servers: readable /prompt 400 errors** (`_prompt_error_text`,
+  same as edit/3D) — clients now see e.g. "node 475: Invalid image file: ..."
+  instead of a bare "HTTP Error 400".
 - **3D server: same LM-Studio-safe inline waits** (FAST_WAIT 25 s, check_image 30 s
   per call) — generate_3d previously held the call up to 120 s and timed out at the
   LM Studio client (-32001) without returning the job_id.
