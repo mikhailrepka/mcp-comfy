@@ -503,6 +503,22 @@ def _cancel_job(job_id: str) -> str:
     return f"Job {job_id} {what}."
 
 
+def _img_note(p):
+    """"(1024x768 jpg 350KB)" для list_results; tolerant — без Pillow вернёт только байты."""
+    try:
+        from PIL import Image
+        with Image.open(p) as im:
+            w, h = im.size
+        kb = os.path.getsize(p) // 1024
+        ext = os.path.splitext(p)[1].lstrip(".").lower() or "?"
+        return f"({w}x{h} {ext} {kb}KB)"
+    except Exception:
+        try:
+            return f"({os.path.getsize(p) // 1024}KB)"
+        except Exception:
+            return ""
+
+
 def _list_results_text(limit: int = 10) -> str:
     """Последние результаты в OUTPUT_DIR (генерации/правки/апскейлы), новые первыми."""
     if not os.path.isdir(OUTPUT_DIR):
@@ -517,7 +533,7 @@ def _list_results_text(limit: int = 10) -> str:
         return f"No result images yet in {OUTPUT_DIR}."
     files.sort(reverse=True)
     limit = max(1, min(int(limit), 50))
-    lines = [f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(mt))}  {p}"
+    lines = [f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(mt))}  {p} {_img_note(p)}"
              for mt, p in files[:limit]]
     if len(files) > limit:
         lines.append(f"(+{len(files) - limit} older; pass a higher `limit` to see more)")

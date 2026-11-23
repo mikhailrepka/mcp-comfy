@@ -277,6 +277,22 @@ def _poll_job(job_id):
     jobstore.put(job_id, jobs[job_id])
 
 
+def _img_note(p):
+    """"(1024x768 jpg 350KB)" для списков/ответов; tolerant — без Pillow вернёт только байты."""
+    try:
+        from PIL import Image
+        with Image.open(p) as im:
+            w, h = im.size
+        kb = os.path.getsize(p) // 1024
+        ext = os.path.splitext(p)[1].lstrip(".").lower() or "?"
+        return f"({w}x{h} {ext} {kb}KB)"
+    except Exception:
+        try:
+            return f"({os.path.getsize(p) // 1024}KB)"
+        except Exception:
+            return ""
+
+
 def _list_inbox():
     """Последние картинки в INBOX_DIR: [(path, mtime_iso)], новые первыми."""
     if not os.path.isdir(INBOX_DIR):
@@ -292,13 +308,16 @@ def _list_inbox():
     out = []
     for p in files[:20]:
         ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(p)))
-        out.append(f"{ts}  {p}")
+        out.append(f"{ts}  {p} {_img_note(p)}")
     return out
 
 
 def _convert_images(paths, fmt="jpg", quality=90, max_width=None, max_height=None):
-    """Конвертирует картинки в fmt (jpg/png) с качеством quality, сохраняя рядом
-    с исходником (для файлов в INBOX_DIR) — возвращает список новых путей."""
+    """Конвертирует/сжимает картинки в fmt, сохраняя рядом с исходником
+    (для файлов в INBOX_DIR). Skip-логика: файл, уже соответствующий запросу
+    (целевое расширение И размеры в пределах max_width/max_height), НЕ
+    перекодируется — повторный JPG→JPG это генерационная потеря качества.
+    Возвращает [(status, path, note)]: status = ok|unchanged|notfound."""
     from PIL import Image
 
     fmt = fmt.lower().lstrip(".")
@@ -314,12 +333,24 @@ def _convert_images(paths, fmt="jpg", quality=90, max_width=None, max_height=Non
     max_width = int(max_width) if max_width else None
     max_height = int(max_height) if max_height else None
 
-    converted = []
+    results = []
     for p in paths:
         p = os.path.expanduser(p)
         if not os.path.isfile(p):
-            converted.append(f"NOT FOUND: {p}")
+            results.append(("notfound", p, ""))
             continue
+        # skip: уже целевой формат и вписывается в лимиты размеров
+        # (без лимитов перекодирование того же формата бессмысленно — unchanged)
+        if p.lower().endswith(ext):
+            try:
+                with Image.open(p) as im:
+                    w, h = im.size
+                if ((not max_width or w <= max_width) and
+                        (not max_height or h <= max_height)):
+                    results.append(("unchanged", p, _img_note(p)))
+                    continue
+            except Exception:
+                pass  # не смогли прочитать — конвертируем как обычно
         root, _ = os.path.splitext(p)
         dst = root + ext
         n = 1
@@ -348,8 +379,8 @@ def _convert_images(paths, fmt="jpg", quality=90, max_width=None, max_height=Non
                 im.save(dst, pil_fmt, quality=quality)
             else:
                 im.save(dst, pil_fmt)
-        converted.append(dst)
-    return converted
+        results.append(("ok", dst, _img_note(dst)))
+    return results
 
 
 def _save_images(paths=None, images=None):
@@ -670,10 +701,13 @@ async def _list_tools_impl():
         ),
         Tool(
             name="convert_image",
-            description="Convert image(s) to JPG or PNG with a given quality, saving the "
-                        "result next to the original (for inbox files — directly in the "
-                        "inbox). Use it to shrink large PNGs to JPG before edit_image — "
-                        "smaller uploads render faster. Returns the converted file paths.",
+            description="Convert/shrink image(s) to JPG/PNG/WEBP with a given quality, "
+                        "optionally downscaling (max_width/max_height, aspect preserved, "
+                        "never upscales), saving the result next to the original. Cheap and "
+                        "safe to ALWAYS run before edit_image — a file already in the target "
+                        "format and within the size limits is returned as 'unchanged' "
+                        "without re-encoding (no generational quality loss); otherwise the "
+                        "converted path is returned. Every result line reports WxH/format/KB.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -793,17 +827,25 @@ async def call_tool(name, arguments):
         if not paths:
             return [TextContent(type="text", text="Nothing to convert: pass `paths`.")]
         try:
-            converted = await asyncio.to_thread(
+            results = await asyncio.to_thread(
                 _convert_images, paths, fmt, quality,
                 arguments.get("max_width"), arguments.get("max_height"))
         except Exception as e:
             return [TextContent(type="text", text=f"Convert failed: {e}")]
-        ok = [p for p in converted if not p.startswith("NOT FOUND")]
-        bad = [p for p in converted if p.startswith("NOT FOUND")]
         size_note = ""
         if arguments.get("max_width") or arguments.get("max_height"):
             size_note = f", max {arguments.get('max_width') or '∞'}x{arguments.get('max_height') or '∞'}"
-        lines = [f"Converted to {fmt} (quality={quality}{size_note}):"] + [f"  {p}" for p in ok] + bad
+        lines = [f"Convert to {fmt} (quality={quality}{size_note}):"]
+        usable = []
+        for status, p, note in results:
+            if status == "notfound":
+                lines.append(f"NOT FOUND: {p}")
+            elif status == "unchanged":
+                lines.append(f"  {p} {note} — unchanged, already compliant; use this path")
+                usable.append(p)
+            else:
+                lines.append(f"  {p} {note}")
+                usable.append(p)
         lines.append("Pass these paths to edit_image / upscale_image.")
         return [TextContent(type="text", text="\n".join(lines))]
 

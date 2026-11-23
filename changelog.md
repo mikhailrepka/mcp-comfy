@@ -7,6 +7,14 @@ are documented here. The file is written in reverse chronological order.
 
 ### Added
 
+- **`convert_image` becomes decision-free** (edit server): skip logic — a file already
+  in the target format and within max_width/max_height limits is returned as
+  `unchanged` WITHOUT re-encoding (repeat JPG→JPG re-encoding loses quality);
+  oversized/same-format-too-big files are converted in place. Every result line
+  reports `WxH format KB`. `list_images` and `list_results` lines now also carry
+  `(WxH ext KB)`. The system-prompt rule is now UNCONDITIONAL ("always run
+  convert_image before edit_image") — the model no longer has to reason about file
+  sizes it cannot see (observed wasting a whole reasoning block on this).
 - **Updater** (`installer/update.sh` / `update.ps1`): safe update of a git clone
   to `origin/main` — `--check` mode (commits + changelog, changes nothing),
   `--yes` for unattended runs, one-time migration of a baked PC_URL into
