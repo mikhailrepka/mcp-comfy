@@ -83,7 +83,7 @@ if [ ! -x "$PY" ]; then
   echo "ERROR: .venv не найден — запусти installer/install.sh (создаст venv и пропишет mcp.json)."
   exit 1
 fi
-"$PY" -m pip install -q "mcp<2" websocket-client Pillow trimesh matplotlib \
+"$PY" -m pip install -q "mcp<2" websocket-client Pillow trimesh matplotlib scikit-image \
   || echo "ВНИМАНИЕ: pip sync завершился с ошибкой — проверь вручную"
 
 # протухшие MCP-процессы LM Studio: останавливаем, свежие поднимутся на

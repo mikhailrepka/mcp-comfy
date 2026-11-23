@@ -5,8 +5,22 @@ are documented here. The file is written in reverse chronological order.
 
 ## 2026-11-24
 
+### Added
+
+- **`repair_3d`** tool (comfy-image-3d): fix NOT-watertight meshes for 3D printing via
+  voxel remeshing (mesh -> filled voxel grid -> marching cubes, scikit-image) —
+  GUARANTEED watertight output, original scale/position preserved; `resolution`
+  (default 256 voxels on the longest axis) trades detail vs face count. Reports
+  faces/watertight/volume before and after. `scikit-image` added to the venv deps.
+- **`threshold`** parameter for `generate_3d` (iso-surface threshold, default 0.6):
+  lower values (e.g. 0.5) often close the surface shell at the source, reducing the
+  need for repair.
+
 ### Fixed
 
+- **3D server: same LM-Studio-safe inline waits** (FAST_WAIT 25 s, check_image 30 s
+  per call) — generate_3d previously held the call up to 120 s and timed out at the
+  LM Studio client (-32001) without returning the job_id.
 - **gen server: inline waits are now LM-Studio-safe** (`COMFY_FAST_WAIT` default 25 s,
   `COMFY_CHECK_WAIT` default 30 s per check_image call; env or local.env). Previously
   generate_image held the tool call up to 90 s and check_image up to 600 s — longer

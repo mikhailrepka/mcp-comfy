@@ -290,6 +290,9 @@ You have image tools from the comfy-image-gen, comfy-image-edit and comfy-image-
   optional. Poll check_image for the GLB path.
 - convert_3d(path, formats) — convert GLB to STL/OBJ/PLY locally (trimesh); reports
   face count and watertightness (STL = geometry only, for printing).
+- repair_3d(path, resolution) — fix a NOT-watertight mesh for 3D printing: voxel
+  remeshing GUARANTEES a watertight closed surface (slight rounding of fine detail).
+  Saves <name>_repaired.glb next to the original.
 - check_image(job_id) — readiness poll. Present on all servers and accepts
   ANY job_id (jobs live in a shared registry): poll via the same server you started
   the job with, but any server works if needed. It returns one of: the finished

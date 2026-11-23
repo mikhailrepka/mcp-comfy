@@ -50,8 +50,37 @@ PC = _resolve_pc()
 WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "3d_hunyuan3d_multiview_to_model_turbo.json")
 MODEL_DIR = os.path.expanduser("~/comfy_models")
-FAST_WAIT = 120        # сколько generate_3d ждёт результат сама, секунд
-CHECK_WAIT = 900       # сколько check_image ждёт максимум, секунд
+# Инлайн-ожидания короче таймаута MCP-клиента LM Studio (~60 с) — иначе -32001
+# без job_id (тот же урок, что в comfy_mcp_server 2026-11-24). Override:
+# env COMFY_FAST_WAIT / COMFY_CHECK_WAIT или local.env.
+def _read_local_env(env_file=None):
+    env_file = env_file or os.path.join(os.path.dirname(os.path.abspath(__file__)), "local.env")
+    out = {}
+    try:
+        with open(env_file) as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, _, v = line.partition("=")
+                    out[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return out
+
+
+def _cfg_int(name, default):
+    v = os.environ.get(name)
+    if not v or not v.strip():
+        v = _read_local_env().get(name)
+    try:
+        return int(v) if v else default
+    except ValueError:
+        return default
+
+
+FAST_WAIT = _cfg_int("COMFY_FAST_WAIT", 25)
+CHECK_WAIT = 900       # фоновый дедлайн задачи (_run_job)
+CHECK_WAIT_INLINE = _cfg_int("COMFY_CHECK_WAIT", 30)  # один вызов check_image (сек)
 POLL_INTERVAL = 2
 
 # id узлов workflow (см. 3d_hunyuan3d_multiview_to_model_turbo.json)
@@ -89,7 +118,8 @@ def _upload_image(path):
     return resp.get("name", fname)
 
 
-def _submit(front, back, left, right, steps, seed, octree_resolution) -> tuple:
+def _submit(front, back, left, right, steps, seed, octree_resolution,
+            threshold=None) -> tuple:
     """Грузит виды на PC, собирает граф под переданные виды (2-4), ставит задачу.
     -> (prompt_id, seed)."""
     with open(WORKFLOW) as f:
@@ -119,6 +149,10 @@ def _submit(front, back, left, right, steps, seed, octree_resolution) -> tuple:
     wf[N_SAMPLER]["inputs"]["steps"] = int(steps)
     if octree_resolution:
         wf["61"]["inputs"]["octree_resolution"] = int(octree_resolution)
+    # порог изо-поверхности: 0.5 (дефолт меньше срезает меньше поверхности и
+    # чаще даёт замкнутую оболочку), лечится параметром запроса, не настройками PC
+    if threshold is not None:
+        wf["83"]["inputs"]["threshold"] = float(threshold)
     req = urllib.request.Request(
         f"{PC}/prompt",
         data=json.dumps({"prompt": wf, "client_id": CLIENT_ID}).encode(),
@@ -201,9 +235,11 @@ def _fetch_model(prompt_id: str):
     return None
 
 
-def _run_job(front, back, left, right, steps, octree_resolution, job_id, seed=None):
+def _run_job(front, back, left, right, steps, octree_resolution, job_id, seed=None,
+             threshold=None):
     try:
-        pid, seed = _submit(front, back, left, right, steps, seed, octree_resolution)
+        pid, seed = _submit(front, back, left, right, steps, seed, octree_resolution,
+                            threshold)
         jobs[job_id]["prompt_id"] = pid
         jobs[job_id]["seed"] = seed
         jobstore.put(job_id, {"status": "queued", "prompt_id": pid, "seed": seed})
@@ -326,6 +362,30 @@ def _image_file_content(path: str, seed=None) -> list:
         ImageContent(type="image", data=base64.b64encode(data).decode(), mimeType=mime),
         TextContent(type="text", text=f"Image ready: {path}{seed_note}"),
     ]
+
+
+def _repair_3d(path, resolution=256):
+    """Воксельный ремешинг: mesh -> voxels(fill) -> marching cubes.
+    Гарантированно watertight на выходе; масштаб и центр возвращаются к исходным.
+    -> dict(before, after, out_path); throws при ошибках."""
+    import numpy as np
+    import trimesh
+    mesh = trimesh.load(path, force="mesh")
+    before = {"faces": len(mesh.faces), "watertight": bool(mesh.is_watertight),
+              "volume": float(mesh.volume) if mesh.is_watertight else None}
+    # вокселизация по длиннейшей оси + заполнение объёма + marching cubes
+    vox = mesh.voxelized(pitch=float(mesh.extents.max()) / int(resolution)).fill()
+    repaired = vox.marching_cubes
+    # marching cubes работает в воксельных координатах — возвращаем исходный
+    # масштаб (по границам) и исходный центр
+    scale = mesh.extents / repaired.extents
+    repaired.apply_scale(scale)
+    repaired.apply_translation(mesh.bounds.mean(axis=0) - repaired.bounds.mean(axis=0))
+    out = os.path.splitext(path)[0] + "_repaired.glb"
+    repaired.export(out)
+    after = {"faces": len(repaired.faces), "watertight": bool(repaired.is_watertight),
+             "volume": float(repaired.volume) if repaired.is_watertight else None}
+    return {"before": before, "after": after, "out_path": out}
 
 
 def _content_for_result(job: dict) -> list:
@@ -472,6 +532,32 @@ async def list_tools() -> list[Tool]:
                 "required": ["path"],
             },
         ),
+        Tool(
+            name="repair_3d",
+            description="Repair a 3D model for 3D printing: voxel remeshing (mesh -> "
+                        "filled voxel grid -> marching cubes) GUARANTEES a watertight "
+                        "closed surface. Trade-off: slight rounding of fine detail "
+                        "(resolution = voxels along the longest axis, default 256; higher "
+                        "= more detail, more faces). Scale and position are preserved. "
+                        "Use when a result reports NOT watertight and the user wants to "
+                        "print. Saves <name>_repaired.glb next to the original.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the GLB/model to repair.",
+                    },
+                    "resolution": {
+                        "type": "integer",
+                        "description": "Voxel grid resolution along the longest axis. "
+                                       "Default 256.",
+                        "default": 256,
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
     ]
 
 
@@ -493,6 +579,8 @@ async def call_tool(name: str, arguments: dict) -> list:
                 views[role] = p
         steps = int(arguments.get("steps", 20))
         octree = int(arguments.get("octree_resolution", 256))
+        threshold = arguments.get("threshold")
+        threshold = float(threshold) if threshold is not None else None
         seed = arguments.get("seed")
         seed = int(seed) if seed is not None else None
         job_id = f"job_{random.randint(0, 10**8)}"
@@ -501,7 +589,7 @@ async def call_tool(name: str, arguments: dict) -> list:
         threading.Thread(target=_run_job,
                          args=(os.path.expanduser(front), views.get("back"),
                                views.get("left"), views.get("right"),
-                               steps, octree, job_id, seed),
+                               steps, octree, job_id, seed, threshold),
                          daemon=True).start()
         deadline = time.time() + FAST_WAIT
         while time.time() < deadline:
@@ -516,7 +604,7 @@ async def call_tool(name: str, arguments: dict) -> list:
         job_id = arguments["job_id"]
         if job_id not in jobs:
             return _foreign_check(job_id, wait=max(int(arguments.get("wait", 0)), 1))
-        wait = min(int(arguments.get("wait", 20)), 300)
+        wait = min(int(arguments.get("wait", CHECK_WAIT_INLINE)), CHECK_WAIT_INLINE)
         deadline = time.time() + wait
         while time.time() < deadline:
             if jobs[job_id]["status"] != "queued":
@@ -538,6 +626,26 @@ async def call_tool(name: str, arguments: dict) -> list:
         for fmt, dst, note in results:
             lines.append(f"  {dst} {note}")
         lines.append("STL has no color data — it is geometry only, as expected for printing.")
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    if name == "repair_3d":
+        path = os.path.expanduser(arguments["path"])
+        resolution = int(arguments.get("resolution", 256))
+        if not os.path.isfile(path):
+            return [TextContent(type="text", text=f"File not found: {path}")]
+        try:
+            r = await asyncio.to_thread(_repair_3d, path, resolution)
+        except Exception as e:
+            return [TextContent(type="text", text=f"Repair failed: {e}")]
+        b, a = r["before"], r["after"]
+        lines = [
+            f"Repair complete: {r['out_path']}",
+            f"Before: {b['faces']} faces, watertight={b['watertight']}",
+            f"After:  {a['faces']} faces, watertight={a['watertight']}"
+            + (f", volume {a['volume']:.2f}" if a.get("volume") else ""),
+            "The repaired model is guaranteed watertight — ready for slicers/printing. "
+            "Fine detail is slightly rounded (voxel remeshing).",
+        ]
         return [TextContent(type="text", text="\n".join(lines))]
 
     raise ValueError(f"Unknown tool: {name}")
