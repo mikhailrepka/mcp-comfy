@@ -309,6 +309,8 @@ Rules:
   instant, and there is nothing to decide: files that are already compliant come back
   "unchanged" without re-encoding, oversized ones (> ~4 MB or > 4000 px, i.e. anything
   worth shrinking) are converted. Do not reason about file sizes — just call it.
+  EXCEPTION: if the user explicitly asks to use the file as-is (no compression, no
+  conversion), skip convert_image and pass the original path directly.
   Final images are usually requested as JPG too — convert the result with the same tool.
 - "Enhance/upscale/make bigger" → upscale_image; use longer_size when the user names a
   target size (e.g. "to 2048px"), otherwise a multiplier of 2-4. The upscale result is a
