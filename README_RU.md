@@ -237,7 +237,17 @@ LM Studio. Любой MCP-клиент может их запустить: ук�
 - upscale_image(source_image, multiplier | longer_size, scale_method) — нейро-апскейл SeedVR2
   (множитель, например 2 или 4, либо целевая длинная сторона в пикселях). Тоже возвращает
   job_id сразу.
-- check_image(job_id) — опрос готовности. Есть на всех трёх серверах и принимает
+- remove_background(source_image, background: white|transparent) — изолировать объект от
+  фона (qwen edit с фиксированным промтом). 'transparent' без настоящей альфы (RGB PNG).
+  Хорошая подготовка перед generate_3d.
+- generate_3d(front_image, [back_image], [left_image], [right_image], [seed]) — 3D-модель
+  (GLB в ~/comfy_models) из фото объекта через Hunyuan3D multiview. ТОЛЬКО image-to-3D:
+  текстового промта нет — front-вид и есть описание (один объект, однородный светлый фон;
+  при пёстром фоне сначала remove_background). front обязателен, остальные виды
+  опциональны. Опрашивай check_image до пути к GLB.
+- convert_3d(path, formats) — конвертация GLB в STL/OBJ/PLY локально (trimesh); сообщает
+  число граней и watertight (STL = только геометрия, для печати).
+- check_image(job_id) — опрос готовности. Есть на всех серверах и принимает
   ЛЮБОЙ job_id (задачи в общем реестре): возвращай картинку по тому же вызову,
   каким делал задачу, но при необходимости можно опрашивать через любой сервер.
   Возвращает одно из: готовую картинку (инлайн), "still rendering" с прогрессом
@@ -291,15 +301,19 @@ LM Studio. Любой MCP-клиент может их запустить: ук�
 ```
 comfy-mcp/
 ├── comfy_mcp_server.py              # MCP-сервер генерации (comfy-image-gen)
-├── edit_mcp_server.py               # MCP-сервер редактирования + convert_image (comfy-image-edit)
+├── edit_mcp_server.py               # MCP-сервер редактирования + convert_image + remove_background (comfy-image-edit)
+├── comfy_3d_mcp_server.py           # MCP-сервер image-to-3D, GLB→STL/OBJ (comfy-image-3d)
 ├── upscale_mcp_server.py            # MCP-сервер апскейла SeedVR2 (comfy-image-upscale)
 ├── jobstore.py                      # общий файловый реестр задач между серверами
 ├── changelog.md                     # значимые изменения, новые сверху
 ├── test_edit_submit.py              # unit-тесты: форма edit-графа, разбор 400, seed
 ├── test_tools.py                    # unit-тесты: comfy_status, cancel_job, list_results, seed
+├── test_convert.py                  # unit-тесты: skip-логика convert_image, размеры
+├── test_3d.py                       # unit-тесты: сборка 3D-графа, fetch GLB, конвертация, remove_background
 ├── nvidia-image-gen.json            # workflow API генерации
 ├── image_qwen_image_2_1_image_edit.json  # workflow API редактирования
 ├── utility_seedvr2_7b_int8_upscale_image.json  # workflow API апскейла
+├── 3d_hunyuan3d_multiview_to_model_turbo.json  # workflow API image-to-3D (Hunyuan3D)
 └── installer/
     ├── install.sh                   # инсталлер macOS/Linux (venv + регистрация в LM Studio)
     ├── install.ps1                  # инсталлер Windows

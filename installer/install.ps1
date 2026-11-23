@@ -57,7 +57,7 @@ $VenvPython = Join-Path $Dir ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
     Invoke-Expression "$Py -m venv `"$Dir\.venv`""
 }
-& $VenvPython -m pip install -q "mcp<2" websocket-client Pillow
+& $VenvPython -m pip install -q "mcp<2" websocket-client Pillow trimesh
 if ($LASTEXITCODE -ne 0) { Write-Error "pip install failed" }
 Write-Host "venv ready: $Dir\.venv"
 
@@ -84,6 +84,7 @@ $Servers = [ordered]@{}
 $Servers["comfy-image-gen"] = @{ command = $VenvPython; args = @((Join-Path $Dir "comfy_mcp_server.py")) }
 $Servers["comfy-image-edit"] = @{ command = $VenvPython; args = @((Join-Path $Dir "edit_mcp_server.py")) }
 $Servers["comfy-image-upscale"] = @{ command = $VenvPython; args = @((Join-Path $Dir "upscale_mcp_server.py")) }
+$Servers["comfy-image-3d"] = @{ command = $VenvPython; args = @((Join-Path $Dir "comfy_3d_mcp_server.py")) }
 
 if (Test-Path $McpPath) {
     Copy-Item $McpPath "$McpPath.bak" -Force

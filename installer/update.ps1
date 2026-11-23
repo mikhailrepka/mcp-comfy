@@ -66,12 +66,12 @@ $VenvPython = Join-Path $Dir ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
     Write-Error ".venv not found - run installer/install.ps1 first (creates venv and registers mcp.json)."
 }
-& $VenvPython -m pip install -q "mcp<2" websocket-client Pillow
+& $VenvPython -m pip install -q "mcp<2" websocket-client Pillow trimesh
 if ($LASTEXITCODE -ne 0) { Write-Host "WARNING: pip sync failed - check manually" }
 
 if (-not $NoKill) {
     Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
-        Where-Object { $_.CommandLine -match '(comfy_mcp_server|edit_mcp_server|upscale_mcp_server)\.py' } |
+        Where-Object { $_.CommandLine -match '(comfy_mcp_server|edit_mcp_server|upscale_mcp_server|comfy_3d_mcp_server)\.py' } |
         ForEach-Object {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
             Write-Host "stopped stale MCP process $($_.ProcessId)"

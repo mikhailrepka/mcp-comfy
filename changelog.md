@@ -3,6 +3,24 @@
 All notable changes to the comfy-mcp MCP servers (generation / edit / upscale)
 are documented here. The file is written in reverse chronological order.
 
+## 2026-11-24
+
+### Added
+
+- **3D generation** (`comfy-image-3d` server, new): `generate_3d` — Hunyuan3D v2
+  multiview turbo, image-to-3D (NO text prompt; front view = description, one object
+  on plain light background). Views: front required, back/left/right optional (the
+  graph is built dynamically per provided views, unused nodes are cut). GLB lands in
+  `~/comfy_models`; `convert_3d` converts GLB→STL/OBJ/PLY locally via trimesh (no
+  network), reporting face count and watertightness. Registered as `comfy-image-3d`
+  in the installers; `trimesh` added to the venv dependency set; updater kill pattern
+  covers the new process. Live-verified end-to-end (GLB 2.1 MB, 144k faces, STL+OBJ).
+- **`remove_background`** tool (edit server): isolate the main object via the qwen
+  edit pipeline with FIXED prompts (no LLM enhancer). Modes: `white` (object on pure
+  white) and `transparent` (isolated object; NOTE: qwen VAE is RGB — no real alpha).
+  Generative: the object may be re-rendered slightly; for pixel-exact preservation a
+  dedicated alpha tool would be needed.
+
 ## 2026-11-23
 
 ### Added

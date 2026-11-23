@@ -50,7 +50,7 @@ echo "Python: $PY ($($PY --version))"
 if [ ! -x "$DIR/.venv/bin/python" ]; then
   "$PY" -m venv "$DIR/.venv"
 fi
-"$DIR/.venv/bin/python" -m pip install -q "mcp<2" websocket-client Pillow
+"$DIR/.venv/bin/python" -m pip install -q "mcp<2" websocket-client Pillow trimesh
 echo "venv готов: $DIR/.venv"
 
 # 3. адрес ComfyUI -> local.env (untracked) + VERSION (короткий коммит).
@@ -83,6 +83,10 @@ servers = {
     "comfy-image-upscale": {
         "command": f"{srv_dir}/.venv/bin/python",
         "args": [f"{srv_dir}/upscale_mcp_server.py"],
+    },
+    "comfy-image-3d": {
+        "command": f"{srv_dir}/.venv/bin/python",
+        "args": [f"{srv_dir}/comfy_3d_mcp_server.py"],
     },
 }
 # старые имена записей (до перехода на новые) — убираем, чтобы не дублировать

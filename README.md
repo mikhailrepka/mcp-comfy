@@ -280,7 +280,17 @@ You have image tools from the comfy-image-gen, comfy-image-edit and comfy-image-
 - upscale_image(source_image, multiplier | longer_size, scale_method) — SeedVR2 neural
   upscale (a multiplier, e.g. 2 or 4, or a target longer side in pixels). Also returns
   a job_id immediately.
-- check_image(job_id) — readiness poll. Present on all three servers and accepts
+- remove_background(source_image, background: white|transparent) — isolate the main object
+  (qwen edit pipeline, fixed prompt). 'transparent' has no real alpha (RGB PNG).
+  Good preprocessing before generate_3d.
+- generate_3d(front_image, [back_image], [left_image], [right_image], [seed]) — 3D model
+  (GLB in ~/comfy_models) from object photos via Hunyuan3D multiview. IMAGE-TO-3D ONLY:
+  no text prompt — the front view IS the description (one object, plain light background;
+  run remove_background first if the background is busy). front required, other views
+  optional. Poll check_image for the GLB path.
+- convert_3d(path, formats) — convert GLB to STL/OBJ/PLY locally (trimesh); reports
+  face count and watertightness (STL = geometry only, for printing).
+- check_image(job_id) — readiness poll. Present on all servers and accepts
   ANY job_id (jobs live in a shared registry): poll via the same server you started
   the job with, but any server works if needed. It returns one of: the finished
   image (inline), "still rendering" with progress (Progress: 10/25 steps, 40%),
@@ -335,15 +345,19 @@ Rules:
 ```
 comfy-mcp/
 ├── comfy_mcp_server.py              # generation MCP server (comfy-image-gen)
-├── edit_mcp_server.py               # editing MCP server + convert_image (comfy-image-edit)
+├── edit_mcp_server.py               # editing MCP server + convert_image + remove_background (comfy-image-edit)
+├── comfy_3d_mcp_server.py           # image-to-3D MCP server, GLB→STL/OBJ (comfy-image-3d)
 ├── upscale_mcp_server.py            # SeedVR2 upscale MCP server (comfy-image-upscale)
 ├── jobstore.py                      # shared cross-server job registry
 ├── changelog.md                     # notable changes, newest first
 ├── test_edit_submit.py              # unit tests: edit workflow shaping, 400 parsing, seed
 ├── test_tools.py                    # unit tests: comfy_status, cancel_job, list_results, seed
+├── test_convert.py                  # unit tests: convert_image skip logic, size notes
+├── test_3d.py                       # unit tests: 3D graph building, GLB fetch, convert, remove_background
 ├── nvidia-image-gen.json            # generation workflow API
 ├── image_qwen_image_2_1_image_edit.json  # editing workflow API
 ├── utility_seedvr2_7b_int8_upscale_image.json  # upscale workflow API
+├── 3d_hunyuan3d_multiview_to_model_turbo.json  # image-to-3D workflow API (Hunyuan3D)
 └── installer/
     ├── install.sh                   # macOS/Linux installer (venv + LM Studio registration)
     ├── install.ps1                   # Windows installer

@@ -83,14 +83,14 @@ if [ ! -x "$PY" ]; then
   echo "ERROR: .venv не найден — запусти installer/install.sh (создаст venv и пропишет mcp.json)."
   exit 1
 fi
-"$PY" -m pip install -q "mcp<2" websocket-client Pillow \
+"$PY" -m pip install -q "mcp<2" websocket-client Pillow trimesh \
   || echo "ВНИМАНИЕ: pip sync завершился с ошибкой — проверь вручную"
 
 # протухшие MCP-процессы LM Studio: останавливаем, свежие поднимутся на
 # следующей MCP-сессии (daemon chat-bot импортирует серверы в себе и под
 # этот паттерн не попадает)
 if [ "$KILL" = "1" ]; then
-  PIDS=$(pgrep -f '(comfy_mcp_server|edit_mcp_server|upscale_mcp_server)\.py' || true)
+  PIDS=$(pgrep -f '(comfy_mcp_server|edit_mcp_server|upscale_mcp_server|comfy_3d_mcp_server)\.py' || true)
   if [ -n "${PIDS:-}" ]; then
     for pid in $PIDS; do
       kill "$pid" 2>/dev/null && echo "остановлен протухший MCP-процесс $pid" || true

@@ -700,6 +700,34 @@ async def _list_tools_impl():
             },
         ),
         Tool(
+            name="remove_background",
+            description="Remove the background from an image, isolating the main object "
+                        "(qwen image-edit pipeline with a fixed prompt — the object may be "
+                        "re-rendered slightly; for pixel-exact object preservation use a "
+                        "dedicated alpha tool instead). Two modes: 'white' (object on pure "
+                        "white background) and 'transparent' (isolated object; NOTE: this "
+                        "pipeline has no alpha channel, the result is RGB). Returns job_id; "
+                        "poll check_image. Good preprocessing step before generate_3d.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_image": {
+                        "type": "string",
+                        "description": "Absolute path to the local image.",
+                    },
+                    "background": {
+                        "type": "string",
+                        "enum": ["white", "transparent"],
+                        "description": "white = object on pure white background; "
+                                       "transparent = isolated object (RGB PNG, no real "
+                                       "alpha). Default white.",
+                        "default": "white",
+                    },
+                },
+                "required": ["source_image"],
+            },
+        ),
+        Tool(
             name="convert_image",
             description="Convert/shrink image(s) to JPG/PNG/WEBP with a given quality, "
                         "optionally downscaling (max_width/max_height, aspect preserved, "
@@ -819,6 +847,46 @@ async def call_tool(name, arguments):
         lines.append("Pass one of these paths to edit_image as source_image "
                      "(and optionally another as reference_image).")
         return [TextContent(type="text", text="\n".join(lines))]
+
+    if name == "remove_background":
+        source_path = arguments["source_image"]
+        mode = arguments.get("background", "white")
+        # фиксированные промты: предсказуемо и без LLM-энхансера (быстрее)
+        if mode == "transparent":
+            prompt = ("Remove the background completely, keeping only the main object, "
+                      "and output a PNG image")
+            alpha_note = (" NOTE: this qwen pipeline has no alpha channel — the result is "
+                          "the isolated object on a plain background (RGB PNG), not real "
+                          "transparency.")
+        elif mode == "white":
+            prompt = ("Isolate the main object from the background and place it on a pure "
+                      "white background, keep the object itself unchanged, output a PNG image")
+            alpha_note = ""
+        else:
+            return [TextContent(type="text",
+                    text=f"Unknown background mode: {mode} (use white or transparent).")]
+        if not os.path.isfile(source_path):
+            return [TextContent(
+                type="text",
+                text=f"source_image not found: {source_path}. "
+                     f"Use list_images or save_images first.",
+            )]
+        job_id = f"job_{random.randint(0, 10**8)}"
+        jobs[job_id] = {"status": "queued"}
+        try:
+            await asyncio.to_thread(_start_job, prompt, source_path, None, 25, job_id)
+        except Exception as e:
+            jobs[job_id] = {"status": "error", "error": str(e)}
+            return _content_for_result(jobs[job_id])
+        threading.Thread(target=_poll_job, args=(job_id,), daemon=True).start()
+        jobstore.put(job_id, {"status": "queued", "prompt_id": jobs[job_id]["prompt_id"]})
+        return [TextContent(
+            type="text",
+            text=f"Task accepted for background removal ({mode}). job_id={job_id} "
+                 f"(source={source_path}, prompt_id={jobs[job_id]['prompt_id']})."
+                 f"{alpha_note} Rendering takes a few minutes — call check_image with "
+                 f"this job_id repeatedly until the image arrives.",
+        )]
 
     if name == "convert_image":
         paths = arguments.get("paths") or []
