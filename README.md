@@ -306,6 +306,9 @@ comfy-mcp/
 ├── edit_mcp_server.py               # editing MCP server + convert_image (comfy-image-edit)
 ├── upscale_mcp_server.py            # SeedVR2 upscale MCP server (comfy-image-upscale)
 ├── jobstore.py                      # shared cross-server job registry
+├── changelog.md                     # notable changes, newest first
+├── test_edit_submit.py              # unit tests: edit workflow shaping, 400 parsing, seed
+├── test_tools.py                    # unit tests: comfy_status, cancel_job, list_results, seed
 ├── nvidia-image-gen.json            # generation workflow API
 ├── image_qwen_image_2_1_image_edit.json  # editing workflow API
 ├── utility_seedvr2_7b_int8_upscale_image.json  # upscale workflow API
