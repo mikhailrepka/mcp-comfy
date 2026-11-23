@@ -124,6 +124,26 @@ PowerShell-инсталлер выполняет те же шаги, что и b
 venv в `.venv\Scripts\python.exe`, папки inbox/результатов под `%USERPROFILE%`,
 конфиг в `%USERPROFILE%\.lmstudio\mcp.json`.
 
+### Обновление
+
+Адрес ComfyUI живёт в `local.env` (untracked, пишет инсталлер) — трекаемые файлы
+всегда совпадают с origin, поэтому обновления проходят чисто и без конфликтов:
+
+```bash
+cd comfy-mcp/installer
+./update.sh --check    # что нового (коммиты + changelog), ничего не меняет
+./update.sh --yes      # обновить: fetch, reset --hard origin/main, синк venv,
+                       # остановка протухших MCP-процессов, проверки здоровья
+```
+
+- Windows: `.\update.ps1 -Check` / `.\update.ps1 -Yes`.
+- Настройки переживают обновление: `local.env`, `VERSION`, `.lmstudio_seen.json`
+  — untracked. НЕ редактируйте трекаемые файлы в установке — держите её чистой.
+- Релизы помечены тегами (`v1.0`, …); чтобы закрепить машину на конкретной
+  версии — `git checkout <тег>` вместо запуска апдейтера.
+- `comfy_status` показывает версию установки (`Install: <коммит>`) — удобно
+  проверять, что на какой машине крутится.
+
 ### Удаление
 
 ```bash
@@ -276,6 +296,8 @@ comfy-mcp/
 └── installer/
     ├── install.sh                   # инсталлер macOS/Linux (venv + регистрация в LM Studio)
     ├── install.ps1                  # инсталлер Windows
+    ├── update.sh                    # апдейтер macOS/Linux (--check / --yes)
+    ├── update.ps1                   # апдейтер Windows
     ├── uninstall.sh                 # удаление записей из mcp.json (bash)
     └── uninstall.ps1                # удаление записей из mcp.json (PowerShell)
 ```
@@ -284,7 +306,7 @@ comfy-mcp/
 
 | Константа | Значение по умолчанию | Смысл |
 |---|---|---|
-| `PC` | `http://localhost:8188` | адрес ComfyUI (меняется install.sh) |
+| `PC` | `http://192.168.1.218:8188` | адрес ComfyUI: env `COMFY_PC_URL` → `local.env` → этот дефолт (installer/update пишут `local.env`) |
 | `INBOX_DIR` | `~/comfy_edit_inbox` | входящие картинки |
 | `LM_FILES_DIR` | `~/.lmstudio/user-files` | откуда watch-поток берёт вложения чата |
 | `WATCH_INTERVAL` | `5` c | период сканирования вложений |

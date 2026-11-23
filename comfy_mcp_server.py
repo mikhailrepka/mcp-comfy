@@ -24,7 +24,31 @@ from mcp.types import ImageContent, TextContent, Tool
 
 import jobstore
 
-PC = "http://192.168.1.218:8188"
+# ComfyUI PC: env COMFY_PC_URL -> local.env рядом с сервером -> дефолт ниже.
+# local.env (строка COMFY_PC_URL=..., untracked) пишут installer/update.sh — сами
+# файлы серверов остаются чистыми, поэтому git pull проходит без конфликтов.
+# Дефолт сохранён с первых версий: старые установки продолжают работать без
+# local.env (все машины этой сети смотрят на один ComfyUI PC).
+def _resolve_pc(env_value=None, env_file=None):
+    if env_value is None:
+        env_value = os.environ.get("COMFY_PC_URL")
+    if env_value and env_value.strip():
+        return env_value.strip().rstrip("/")
+    env_file = env_file or os.path.join(os.path.dirname(os.path.abspath(__file__)), "local.env")
+    try:
+        with open(env_file) as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith("COMFY_PC_URL="):
+                    v = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if v:
+                        return v.rstrip("/")
+    except OSError:
+        pass
+    return "http://192.168.1.218:8188"
+
+
+PC = _resolve_pc()
 WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nvidia-image-gen.json")
 OUTPUT_DIR = os.path.expanduser("~/comfy_images")
 FAST_WAIT = 90        # сколько generate_image ждёт результат сама, секунд
@@ -399,6 +423,16 @@ def _progress_note(job: dict) -> str:
     return ""
 
 
+def _install_version(dir=None) -> str:
+    """Версия установки (короткий коммит) — пишется в VERSION инсталлером/update.sh."""
+    base = dir or os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(base, "VERSION")) as fh:
+            return fh.read().strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
 def _comfy_status_text() -> str:
     """Доступность PC, GPU/RAM и очередь рендера — для диагностики перед задачей."""
     try:
@@ -407,7 +441,8 @@ def _comfy_status_text() -> str:
         return (f"ComfyUI PC unreachable ({e}). The PC is probably asleep or ComfyUI is "
                 f"not running — ask the user to wake it up; image jobs will fail until then.")
     sysinfo = st.get("system", {})
-    lines = [f"ComfyUI OK: {PC} (version {sysinfo.get('comfyui_version', '?')})"]
+    lines = [f"ComfyUI OK: {PC} (version {sysinfo.get('comfyui_version', '?')})",
+             f"Install: {_install_version()}"]
     for dev in st.get("devices", []):
         vt, vf = dev.get("vram_total", 0) or 0, dev.get("vram_free", 0) or 0
         lines.append(f"GPU: {dev.get('name', '?')} — VRAM free {vf / 2**30:.1f} / {vt / 2**30:.1f} GB")

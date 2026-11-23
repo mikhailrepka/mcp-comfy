@@ -11,7 +11,8 @@
 #
 # Что делает:
 #   1. находит Python >= 3.10, создаёт .venv, ставит "mcp<2", websocket-client, Pillow;
-#   2. прописывает PC_URL во все серверы;
+#   2. пишет PC_URL в local.env (untracked) — серверные файлы остаются чистыми,
+#      чтобы git pull/update.sh проходили без конфликтов; пишет VERSION;
 #   3. создаёт ~/comfy_images и ~/comfy_edit_inbox;
 #   4. регистрирует comfy-image-gen, comfy-image-edit и comfy-image-upscale
 #      в ~/.lmstudio/mcp.json (merge с бэкапом .bak, старые имена записей убирает);
@@ -52,21 +53,14 @@ fi
 "$DIR/.venv/bin/python" -m pip install -q "mcp<2" websocket-client Pillow
 echo "venv готов: $DIR/.venv"
 
-# 3. адрес ComfyUI во всех серверах
-"$DIR/.venv/bin/python" - "$PC_URL" <<'PYEOF'
-import re, sys
-url = sys.argv[1]
-for fname in ("comfy_mcp_server.py", "edit_mcp_server.py", "upscale_mcp_server.py"):
-    with open(fname) as f:
-        src = f.read()
-    if not re.search(r'PC\s*=\s*"http://[^"]+"', src):
-        print(f"ВНИМАНИЕ: PC не найден в {fname}, проверь вручную")
-        continue
-    new = re.sub(r'PC\s*=\s*"http://[^"]+"', f'PC = "{url}"', src, count=1)
-    with open(fname, "w") as f:
-        f.write(new)
-    print(f"{fname}: PC = {url}")
-PYEOF
+# 3. адрес ComfyUI -> local.env (untracked) + VERSION (короткий коммит).
+#    Серверные файлы НЕ изменяются: они читают local.env при старте, поэтому
+#    трекаемые файлы всегда совпадают с origin и обновление — чистый git pull.
+printf 'COMFY_PC_URL=%s\n' "$PC_URL" > "$DIR/local.env"
+echo "PC_URL -> $DIR/local.env (COMFY_PC_URL=$PC_URL)"
+VERSION=$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)
+printf '%s\n' "$VERSION" > "$DIR/VERSION"
+echo "Версия установки: $VERSION"
 
 # 4. рабочие папки
 mkdir -p ~/comfy_images ~/comfy_edit_inbox

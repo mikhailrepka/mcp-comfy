@@ -30,7 +30,29 @@ from mcp.types import ImageContent, TextContent, Tool
 
 import jobstore
 
-PC = "http://192.168.1.218:8188"
+# ComfyUI PC: env COMFY_PC_URL -> local.env рядом с сервером -> дефолт ниже.
+# local.env (строка COMFY_PC_URL=..., untracked) пишут installer/update.sh — сами
+# файлы серверов остаются чистыми, поэтому git pull проходит без конфликтов.
+def _resolve_pc(env_value=None, env_file=None):
+    if env_value is None:
+        env_value = os.environ.get("COMFY_PC_URL")
+    if env_value and env_value.strip():
+        return env_value.strip().rstrip("/")
+    env_file = env_file or os.path.join(os.path.dirname(os.path.abspath(__file__)), "local.env")
+    try:
+        with open(env_file) as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith("COMFY_PC_URL="):
+                    v = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if v:
+                        return v.rstrip("/")
+    except OSError:
+        pass
+    return "http://192.168.1.218:8188"
+
+
+PC = _resolve_pc()
 WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image_qwen_image_2_1_image_edit.json")
 OUTPUT_DIR = os.path.expanduser("~/comfy_images")
 INBOX_DIR = os.path.expanduser("~/comfy_edit_inbox")  # сюда пользователь кладёт картинки для редактирования

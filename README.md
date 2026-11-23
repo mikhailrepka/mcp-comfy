@@ -167,6 +167,26 @@ The PowerShell installer performs the same steps as the bash one, with Windows
 paths: venv in `.venv\Scripts\python.exe`, inbox/results under
 `%USERPROFILE%`, config at `%USERPROFILE%\.lmstudio\mcp.json`.
 
+### Updating
+
+The ComfyUI address lives in `local.env` (untracked, written by the installer) —
+tracked files always match origin, so updates are clean and conflict-free:
+
+```bash
+cd comfy-mcp/installer
+./update.sh --check    # what's new (commits + changelog), changes nothing
+./update.sh --yes      # update: fetch, reset --hard origin/main, venv sync,
+                       # kill stale LM Studio MCP processes, health checks
+```
+
+- Windows: `.\update.ps1 -Check` / `.\update.ps1 -Yes`.
+- Your settings survive: `local.env`, `VERSION`, `.lmstudio_seen.json` are
+  untracked. Do NOT edit tracked files in an installation — keep it pristine.
+- Releases are tagged (`v1.0`, …); to pin a machine to a specific version,
+  `git checkout <tag>` instead of running the updater.
+- `comfy_status` reports the installed version (`Install: <commit>`) — handy
+  for checking which machine runs what.
+
 ### Uninstall
 
 ```bash
@@ -320,6 +340,8 @@ comfy-mcp/
 └── installer/
     ├── install.sh                   # macOS/Linux installer (venv + LM Studio registration)
     ├── install.ps1                   # Windows installer
+    ├── update.sh                    # macOS/Linux updater (--check / --yes)
+    ├── update.ps1                   # Windows updater
     ├── uninstall.sh                 # removes entries from mcp.json (bash)
     └── uninstall.ps1                # removes entries from mcp.json (PowerShell)
 ```
@@ -328,7 +350,7 @@ comfy-mcp/
 
 | Constant | Default | Meaning |
 |---|---|---|
-| `PC` | `http://localhost:8188` | ComfyUI address (rewritten by the installer) |
+| `PC` | `http://192.168.1.218:8188` | ComfyUI address: env `COMFY_PC_URL` → `local.env` → this default (installer/update write `local.env`) |
 | `INBOX_DIR` | `~/comfy_edit_inbox` | incoming images |
 | `LM_FILES_DIR` | `~/.lmstudio/user-files` | where the watcher picks up chat attachments |
 | `WATCH_INTERVAL` | `5` s | attachment scan period |

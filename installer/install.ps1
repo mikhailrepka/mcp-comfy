@@ -61,18 +61,15 @@ if (-not (Test-Path $VenvPython)) {
 if ($LASTEXITCODE -ne 0) { Write-Error "pip install failed" }
 Write-Host "venv ready: $Dir\.venv"
 
-# 3. ComfyUI URL in all servers
-foreach ($fname in @("comfy_mcp_server.py", "edit_mcp_server.py", "upscale_mcp_server.py")) {
-    $path = Join-Path $Dir $fname
-    $src = Get-Content $path -Raw
-    if ($src -notmatch 'PC\s*=\s*"http://[^"]+"') {
-        Write-Host "WARNING: PC assignment not found in $fname - check manually"
-        continue
-    }
-    $src = $src -replace 'PC\s*=\s*"http://[^"]+"', ('PC = "' + $PC_URL + '"')
-    Set-Content -Path $path -Value $src -NoNewline -Encoding UTF8
-    Write-Host "${fname}: PC = $PC_URL"
-}
+# 3. ComfyUI URL -> local.env (untracked) + VERSION (short commit).
+#    Server files are NOT modified: they read local.env at startup, so tracked
+#    files always match origin and updates are a clean git pull.
+Set-Content -Path (Join-Path $Dir "local.env") -Value "COMFY_PC_URL=$PC_URL" -Encoding ASCII
+Write-Host "PC_URL -> local.env (COMFY_PC_URL=$PC_URL)"
+$Ver = git rev-parse --short HEAD 2>$null
+if (-not $Ver) { $Ver = "unknown" }
+Set-Content -Path (Join-Path $Dir "VERSION") -Value $Ver
+Write-Host "Install version: $Ver"
 
 # 4. working folders
 foreach ($dirName in @("comfy_images", "comfy_edit_inbox")) {

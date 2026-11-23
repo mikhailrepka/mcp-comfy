@@ -7,6 +7,15 @@ are documented here. The file is written in reverse chronological order.
 
 ### Added
 
+- **Updater** (`installer/update.sh` / `update.ps1`): safe update of a git clone
+  to `origin/main` — `--check` mode (commits + changelog, changes nothing),
+  `--yes` for unattended runs, one-time migration of a baked PC_URL into
+  `local.env`, venv dependency sync, killing stale LM Studio MCP processes
+  (they respawn on the next MCP session), ComfyUI health check. Releases are
+  tagged (`v1.0`, …).
+- **`comfy_status` reports the install version** (`Install: <commit>`, read
+  from the untracked `VERSION` file written by installer/updater) — useful to
+  see which machine runs what.
 - **`n` variants in one generation** for `generate_image` (batch_size on the latent
   node, 1–4): one `job_id`, `check_image` returns ALL images of the batch, and the
   result text lists every path (`Image generated: ...` per line). The chat-bot daemon
@@ -43,6 +52,15 @@ are documented here. The file is written in reverse chronological order.
 - `/prompt` HTTP 400 body is parsed (`error` + `node_errors`) into a readable
   error message (`node 475: Custom validation failed ... — Invalid image file:
   ...`) instead of a bare "HTTP Error 400".
+
+### Changed
+
+- **ComfyUI address moved out of the server files**: `PC` is resolved at startup
+  (env `COMFY_PC_URL` → `local.env` next to the server → built-in default
+  `http://192.168.1.218:8188`). The installer no longer rewrites tracked files —
+  it writes `local.env` and `VERSION`; a `git pull` in an installation is now
+  always conflict-free. Existing installs keep working unchanged without
+  `local.env` (they used the same default address).
 
 ## 2026-11-22
 
