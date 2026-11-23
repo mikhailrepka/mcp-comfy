@@ -288,6 +288,7 @@ def _foreign_check(job_id: str, wait=1) -> list:
                  f"server). Call check_image again.")]
 
 
+@app.list_tools()
 async def list_tools() -> list[Tool]:
     return [
         Tool(
