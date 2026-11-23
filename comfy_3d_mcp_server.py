@@ -309,7 +309,30 @@ def _render_previews(path, max_faces=20000):
         return []
 
 
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+_MODEL_EXTS = (".glb", ".gltf", ".stl", ".obj", ".ply")
+
+
+def _image_file_content(path: str, seed=None) -> list:
+    """Картинка-результат инлайном (jobstore общий — через srv3d могут опрашивать
+    и задачи gen/edit; без этого LM Studio получает только текст и не может
+    показать картинку — баг 2026-11-24)."""
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}.get(
+        path.rsplit(".", 1)[-1].lower(), "image/png")
+    with open(path, "rb") as fh:
+        data = fh.read()
+    seed_note = f"\nSeed: {seed}" if seed is not None else ""
+    return [
+        ImageContent(type="image", data=base64.b64encode(data).decode(), mimeType=mime),
+        TextContent(type="text", text=f"Image ready: {path}{seed_note}"),
+    ]
+
+
 def _content_for_result(job: dict) -> list:
+    # общий jobstore: через этот сервер могут опрашивать и КАРТИНОЧНЫЕ задачи
+    # (check_image у клиента один) — маршрутизируем по расширению результата
+    if job["status"] == "done" and job.get("path", "").lower().endswith(_IMAGE_EXTS):
+        return _image_file_content(job["path"], job.get("seed"))
     if job["status"] == "done":
         seed_note = f"\nSeed: {job['seed']}" if job.get("seed") is not None else ""
         # GLB не инлайним (не картинка): рендерим превью-ракурсы в PNG —
