@@ -735,10 +735,17 @@ async def _list_tools_impl():
                         "safe to ALWAYS run before edit_image — a file already in the target "
                         "format and within the size limits is returned as 'unchanged' "
                         "without re-encoding (no generational quality loss); otherwise the "
-                        "converted path is returned. Every result line reports WxH/format/KB.",
+                        "converted path is returned. Every result line reports WxH/format/KB. "
+                        "inline=true attaches the converted images (up to 4) to the answer.",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "inline": {
+                        "type": "boolean",
+                        "description": "Attach the converted images (up to 4) to the answer "
+                                       "inline. Default false.",
+                        "default": False,
+                    },
                     "paths": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -903,19 +910,44 @@ async def call_tool(name, arguments):
         size_note = ""
         if arguments.get("max_width") or arguments.get("max_height"):
             size_note = f", max {arguments.get('max_width') or '∞'}x{arguments.get('max_height') or '∞'}"
+        inline = bool(arguments.get("inline", False))
         lines = [f"Convert to {fmt} (quality={quality}{size_note}):"]
-        usable = []
+        content = []
+        attached = []
+        inline_cap = 4  # base64 раздувает ответ; остальное — путями
         for status, p, note in results:
             if status == "notfound":
                 lines.append(f"NOT FOUND: {p}")
-            elif status == "unchanged":
+                continue
+            attach = inline and len(attached) < inline_cap
+            if attach:
+                try:
+                    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}.get(
+                        p.rsplit(".", 1)[-1].lower(), "image/png")
+                    with open(p, "rb") as fh:
+                        data = fh.read()
+                    content.append(ImageContent(
+                        type="image", data=base64.b64encode(data).decode(), mimeType=mime))
+                    attached.append(p)
+                    # "Image ready: {p}" — БЕЗ заметок на той же строке: daemon
+                    # парсит строку целиком как путь, суффикс сломал бы pairing
+                    lines.append(f"Image ready: {p}")
+                    tag = "unchanged, already compliant" if status == "unchanged" else note
+                    lines.append(f"  ({tag})")
+                    continue
+                except Exception as e:
+                    print(f"[convert] inline skip {p}: {e}", flush=True)
+                    if p in attached:
+                        attached.remove(p)
+            if status == "unchanged":
                 lines.append(f"  {p} {note} — unchanged, already compliant; use this path")
-                usable.append(p)
             else:
                 lines.append(f"  {p} {note}")
-                usable.append(p)
         lines.append("Pass these paths to edit_image / upscale_image.")
-        return [TextContent(type="text", text="\n".join(lines))]
+        if attached:
+            lines.insert(1, f"({len(attached)} attached inline)")
+        content.append(TextContent(type="text", text="\n".join(lines)))
+        return content
 
     raise ValueError(f"Unknown tool: {name}")
 

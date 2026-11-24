@@ -12,6 +12,9 @@ are documented here. The file is written in reverse chronological order.
   under the tool call, the chat-bot delivers them to chat via its existing pipeline
   (the inlined files are listed with "Image ready:" lines that its pairing regex
   understands).
+- **`convert_image` gains `inline`** (same semantics): converted files (up to 4)
+  attached as ImageContent; "Image ready:" lines are kept CLEAN (no size suffix on
+  the same line) so the chat-bot pairing extracts the exact path.
 - **`repair_3d`** tool (comfy-image-3d): fix NOT-watertight meshes for 3D printing via
   voxel remeshing (mesh -> filled voxel grid -> marching cubes, scikit-image) —
   GUARANTEED watertight output, original scale/position preserved; `resolution`

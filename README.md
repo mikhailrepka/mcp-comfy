@@ -278,7 +278,8 @@ You have image tools from the comfy-image-gen, comfy-image-edit and comfy-image-
   the result is saved next to the original. Cheap and safe to ALWAYS run before
   edit_image: a file already in the target format and within the limits comes back
   "unchanged" without re-encoding (no generational quality loss), and every result
-  line reports WxH/format/KB.
+  line reports WxH/format/KB. inline=true attaches the converted images (up to 4)
+  to the answer — use when the user asks to SEE the conversion result.
 - upscale_image(source_image, multiplier | longer_size, scale_method) — SeedVR2 neural
   upscale (a multiplier, e.g. 2 or 4, or a target longer side in pixels). Also returns
   a job_id immediately.
