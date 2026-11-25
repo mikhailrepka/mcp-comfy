@@ -49,3 +49,19 @@ def get(job_id):
     """Возвращает запись задачи (или None), независимо от того, какой сервер её создал."""
     rec = _load().get(job_id)
     return dict(rec) if rec else None
+
+
+def poll(job_id, wait=20, interval=1.0):
+    """Честное ожидание чужой задачи: цикл опроса до `wait` секунд (не разовый sleep).
+    Любой сервер, получив check_image чужого job_id, ведёт себя как родной —
+    иначе клиент, маршрутизирующий check_image на «последний» сервер (LM Studio
+    так и делает), получает деградированную проверку. Возвращает свежую запись
+    (или последнюю известную/None)."""
+    deadline = time.time() + max(int(wait), 1)
+    rec = get(job_id)
+    while time.time() < deadline:
+        if rec and rec.get("status") in ("done", "error"):
+            return rec
+        time.sleep(interval)
+        rec = get(job_id)
+    return rec

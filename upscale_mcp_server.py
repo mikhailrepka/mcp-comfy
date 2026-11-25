@@ -284,30 +284,25 @@ def _content_for_result(job):
     return content
 
 
-def _foreign_check(job_id):
-    """check_image для задачи, созданной другим comfy-mcp сервером (через jobstore)."""
-    rec = jobstore.get(job_id)
+def _foreign_check(job_id, wait=20):
+    """check_image чужой задачи через общий jobstore — эквивалент родной проверки
+    (честный poll, не разовый sleep): клиент может направить check_image на любой
+    сервер, поведение не должно деградировать."""
+    rec = jobstore.poll(job_id, wait=max(int(wait), 1))
     if rec is None:
         return [TextContent(type="text",
                 text=f"Unknown job_id: {job_id}. It may belong to a restarted session — "
                      f"start a new task.")]
-    status = rec.get("status")
-    if status == "done":
+    if rec.get("status") == "done":
         return _image_file_content(rec["path"])
-    if status == "error":
+    if rec.get("status") == "error":
         return [TextContent(type="text", text=f"Task failed: {rec.get('error')}")]
     pr = rec.get("progress")
     prog = ""
     if pr and pr.get("max"):
         prog = f" Progress: {pr['value']}/{pr['max']} ({int(pr['value'] * 100 / pr['max'])}%)."
-    rec = jobstore.get(job_id) or rec
-    if rec.get("status") == "done":
-        return _image_file_content(rec["path"])
-    if rec.get("status") == "error":
-        return [TextContent(type="text", text=f"Task failed: {rec.get('error')}")]
     return [TextContent(type="text",
-            text=f"Still rendering (job_id={job_id}, started by another comfy-mcp "
-                 f"server).{prog} Call check_image again.")]
+            text=f"Still rendering (job_id={job_id}).{prog} Call check_image again.")]
 
 
 def _image_file_content(path):
@@ -451,7 +446,7 @@ async def call_tool(name, arguments):
         job_id = arguments["job_id"]
         if job_id not in jobs:
             # задача могла быть создана другим comfy-mcp сервером — смотрим общий реестр
-            return _foreign_check(job_id)
+            return _foreign_check(job_id, wait=arguments.get("wait", 20))
         wait = min(int(arguments.get("wait", CHECK_WAIT_DEFAULT)), CHECK_WAIT_MAX)
         deadline = time.time() + wait
         while time.time() < deadline:

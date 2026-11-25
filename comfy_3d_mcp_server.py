@@ -417,28 +417,22 @@ def _content_for_result(job: dict) -> list:
     return [TextContent(type="text", text=f"3D generation failed: {job['error']}")]
 
 
-def _foreign_check(job_id: str, wait=1) -> list:
-    rec = jobstore.get(job_id)
+def _foreign_check(job_id: str, wait=20) -> list:
+    """check_image чужой задачи через общий jobstore — эквивалент родной проверки
+    (честный poll через jobstore.poll); маршрутизация по типу результата —
+    картинки инлайном, модели текстом с превью."""
+    rec = jobstore.poll(job_id, wait=max(int(wait), 1))
     if rec is None:
         return [TextContent(type="text",
                 text=f"Unknown job_id: {job_id}. It may belong to a restarted session — "
                      f"start a new task.")]
-    status = rec.get("status")
-    if status == "done":
-        return _content_for_result({"status": "done", "path": rec["path"],
-                                    "seed": rec.get("seed")})
-    if status == "error":
-        return [TextContent(type="text", text=f"Task failed: {rec.get('error')}")]
-    time.sleep(min(wait, 5))
-    rec = jobstore.get(job_id) or rec
     if rec.get("status") == "done":
         return _content_for_result({"status": "done", "path": rec["path"],
                                     "seed": rec.get("seed")})
     if rec.get("status") == "error":
         return [TextContent(type="text", text=f"Task failed: {rec.get('error')}")]
     return [TextContent(type="text",
-            text=f"Still rendering (job_id={job_id}, started by another comfy-mcp "
-                 f"server). Call check_image again.")]
+            text=f"Still rendering (job_id={job_id}). Call check_image again.")]
 
 
 @app.list_tools()
@@ -603,7 +597,7 @@ async def call_tool(name: str, arguments: dict) -> list:
     if name == "check_image":
         job_id = arguments["job_id"]
         if job_id not in jobs:
-            return _foreign_check(job_id, wait=max(int(arguments.get("wait", 0)), 1))
+            return _foreign_check(job_id, wait=arguments.get("wait", CHECK_WAIT_INLINE))
         wait = min(int(arguments.get("wait", CHECK_WAIT_INLINE)), CHECK_WAIT_INLINE)
         deadline = time.time() + wait
         while time.time() < deadline:

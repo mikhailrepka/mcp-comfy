@@ -13,12 +13,14 @@ import sys
 import tempfile
 import time
 import unittest
+import subprocess as sp
 import urllib.error
 from unittest import mock
 
 sys.path.insert(0, "/Users/mikhailrepka/comfy-mcp")
 
 import comfy_mcp_server as gen
+import jobstore
 
 QUEUE_OK = json.dumps({
     "queue_running": [["0", "run-pid", {}, {}, []]],
@@ -319,6 +321,155 @@ class InstallVersionTests(unittest.TestCase):
         with open(os.path.join(tmp, "VERSION"), "w") as fh:
             fh.write("abc1234\n")
         self.assertEqual(gen._install_version(tmp), "abc1234")
+
+
+
+
+class InlineWaitConfigTests(unittest.TestCase):
+    """FAST_WAIT/CHECK_WAIT_INLINE: дефолты безопасны для LM Studio (~60s таймаут
+    клиента), переопределяются env COMFY_FAST_WAIT / COMFY_CHECK_WAIT."""
+
+    def test_defaults(self):
+        self.assertEqual(gen.FAST_WAIT, 25)
+        self.assertEqual(gen.CHECK_WAIT_INLINE, 30)
+        self.assertEqual(gen.CHECK_WAIT, 600)  # фоновый дедлайн не тронут
+
+    def test_env_overrides(self):
+        env = dict(os.environ)
+        env["COMFY_FAST_WAIT"] = "55"
+        env["COMFY_CHECK_WAIT"] = "45"
+        code = ("import sys; sys.path.insert(0, %r); import comfy_mcp_server as g; "
+                "print(g.FAST_WAIT, g.CHECK_WAIT_INLINE)" % os.path.dirname(gen.__file__))
+        r = sp.run([sys.executable, "-I", "-c", code], env=env,
+                   capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+        self.assertEqual(r.stdout.strip(), "55 45")
+
+
+class InlineWaitConfigTests(unittest.TestCase):
+    """FAST_WAIT/CHECK_WAIT_INLINE: дефолты безопасны для LM Studio (~60s таймаут
+    клиента), переопределяются env COMFY_FAST_WAIT / COMFY_CHECK_WAIT."""
+
+    def test_defaults(self):
+        self.assertEqual(gen.FAST_WAIT, 25)
+        self.assertEqual(gen.CHECK_WAIT_INLINE, 30)
+        self.assertEqual(gen.CHECK_WAIT, 600)  # фоновый дедлайн не тронут
+
+    def test_env_overrides(self):
+        env = dict(os.environ)
+        env["COMFY_FAST_WAIT"] = "55"
+        env["COMFY_CHECK_WAIT"] = "45"
+        code = ("import sys; sys.path.insert(0, %r); import comfy_mcp_server as g; "
+                "print(g.FAST_WAIT, g.CHECK_WAIT_INLINE)" % os.path.dirname(gen.__file__))
+        r = sp.run([sys.executable, "-I", "-c", code], env=env,
+                   capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+        self.assertEqual(r.stdout.strip(), "55 45")
+
+
+class PromptError400Tests(unittest.TestCase):
+    """gen и upscale: 400 от /prompt разбирается в читаемую ошибку
+    (тот же паттерн, что в edit/3D)."""
+
+    BODY = json.dumps({
+        "error": {"message": "Prompt outputs failed validation"},
+        "node_errors": {"57:30": {"errors": [{
+            "message": "Value not in list", "details": "bad_clip.safetensors"}]}},
+    }).encode()
+
+    def _http_error(self):
+        return urllib.error.HTTPError("http://pc/prompt", 400, "Bad Request",
+                                      {"Content-Type": "application/json"},
+                                      io.BytesIO(self.BODY))
+
+    def test_gen_submit_raises_readable(self):
+        with mock.patch("urllib.request.urlopen", side_effect=self._http_error()):
+            with self.assertRaisesRegex(RuntimeError, "node 57:30.*bad_clip"):
+                gen._submit("p", 512, 512, 8)
+
+    def test_upscale_submit_raises_readable(self):
+        import upscale_mcp_server as up
+        with mock.patch("urllib.request.urlopen", side_effect=self._http_error()):
+            with self.assertRaisesRegex(RuntimeError, "node 57:30.*bad_clip"):
+                up._submit("src.png", 2, None, "lanczos")
+
+
+class ListResultsInlineTests(unittest.TestCase):
+    """inline=true прикладывает новейшие картинки ImageContent (кап 4);
+    строки 'Image ready:' идут в порядке картинок (pairing у daemon'а)."""
+
+    def setUp(self):
+        import trimesh  # noqa: F401  (убеждаемся, что PIL доступен через тесты)
+        from PIL import Image
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        old = gen.OUTPUT_DIR
+        gen.OUTPUT_DIR = self.tmp
+        self.addCleanup(setattr, gen, "OUTPUT_DIR", old)
+        self.paths = []
+        for i in range(5):
+            p = os.path.join(self.tmp, f"r{i}.png")
+            Image.new("RGB", (16, 16), (10 * i, 20, 30)).save(p)
+            os.utime(p, (time.time() - 100 * (5 - i),) * 2)
+            self.paths.append(p)
+
+    def _call(self, args):
+        import asyncio
+        return asyncio.run(gen.call_tool("list_results", args))
+
+    def test_inline_attaches_up_to_four(self):
+        content = self._call({"inline": True, "limit": 10})
+        kinds = [getattr(i, "type", "?") for i in content]
+        self.assertEqual(kinds.count("image"), 4)  # кап
+        text = [i.text for i in content if getattr(i, "type", None) == "text"][0]
+        self.assertEqual(text.count("Image ready:"), 4)
+        # порядок: новейшие первыми
+        first = text.split("Image ready: ")[1].splitlines()[0]
+        self.assertEqual(first.strip().split(" ")[0], self.paths[4])
+
+    def test_default_text_only(self):
+        content = self._call({"limit": 3})
+        self.assertNotIn("image", [getattr(i, "type", "?") for i in content])
+        text = [i.text for i in content if getattr(i, "type", None) == "text"][0]
+        self.assertNotIn("Image ready:", text)
+
+
+class JobstorePollTests(unittest.TestCase):
+    """jobstore.poll — честное ожидание чужой задачи (общий jobstore):
+    LM Studio направляет check_image на ПОСЛЕДНИЙ зарегистрированный сервер,
+    поэтому чужая проверка обязана быть эквивалентной родной (баг 2026-11-24:
+    разовый sleep 5с + 'started by another server' сбивал модель)."""
+
+    def test_poll_returns_done_immediately(self):
+        with mock.patch.object(jobstore, "_load",
+                               return_value={"j": {"status": "done", "path": "/x.png"}}):
+            rec = jobstore.poll("j", wait=5, interval=0.1)
+        self.assertEqual(rec["status"], "done")
+
+    def test_poll_waits_until_done(self):
+        states = iter([
+            {"j": {"status": "queued"}},
+            {"j": {"status": "queued"}},
+            {"j": {"status": "done", "path": "/x.png"}},
+        ])
+        sleeps = []
+        with mock.patch.object(jobstore, "_load", side_effect=lambda: next(states)), \
+                mock.patch("time.sleep", side_effect=lambda s: sleeps.append(s)):
+            rec = jobstore.poll("j", wait=30, interval=0.0)
+        self.assertEqual(rec["status"], "done")
+        self.assertEqual(len(sleeps), 2)
+
+    def test_poll_timeout_returns_last_known(self):
+        with mock.patch.object(jobstore, "_load",
+                               return_value={"j": {"status": "queued"}}), \
+                mock.patch("time.sleep", return_value=None), \
+                mock.patch("time.time", side_effect=[0, 1, 2, 3, 100]):
+            rec = jobstore.poll("j", wait=2, interval=1)
+        self.assertEqual(rec["status"], "queued")
+
+    def test_unknown_job_returns_none(self):
+        with mock.patch.object(jobstore, "_load", return_value={}):
+            self.assertIsNone(jobstore.poll("nope", wait=1, interval=0.1))
 
 
 if __name__ == "__main__":

@@ -427,7 +427,7 @@ async def call_tool(name: str, arguments: dict) -> list:
         job_id = arguments["job_id"]
         if job_id not in jobs:
             # задача могла быть создана другим comfy-mcp сервером — смотрим общий реестр
-            return _foreign_check(job_id)
+            return _foreign_check(job_id, wait=arguments.get("wait", CHECK_WAIT_INLINE))
         deadline = time.time() + min(int(arguments.get("wait", CHECK_WAIT_INLINE)), CHECK_WAIT_INLINE)
         while time.time() < deadline:
             await asyncio.sleep(POLL_INTERVAL)
@@ -480,29 +480,29 @@ async def call_tool(name: str, arguments: dict) -> list:
     raise ValueError(f"Unknown tool: {name}")
 
 
-def _foreign_check(job_id: str) -> list:
-    """check_image для задачи, созданной другим comfy-mcp сервером (через jobstore)."""
-    rec = jobstore.get(job_id)
+def _foreign_check(job_id: str, wait=20) -> list:
+    """check_image чужой задачи через общий jobstore — эквивалент родной проверки
+    (честный poll через jobstore.poll, не разовый sleep): клиент может направить
+    check_image на любой сервер, поведение не должно деградировать."""
+    rec = jobstore.poll(job_id, wait=max(int(wait), 1))
     if rec is None:
         return [TextContent(type="text",
                 text=f"Unknown job_id: {job_id}. It may belong to a restarted session — "
                      f"start a new task.")]
-    status = rec.get("status")
-    if status == "done":
+    if rec.get("status") == "done":
         # батч-задачи несут список путей — отдаём все картинки
         content = []
         for p in (rec.get("paths") or [rec["path"]]):
             content.extend(_image_file_content(p, rec.get("seed")))
         return content
-    if status == "error":
+    if rec.get("status") == "error":
         return [TextContent(type="text", text=f"Task failed: {rec.get('error')}")]
     pr = rec.get("progress")
     prog = ""
     if pr and pr.get("max"):
         prog = f" Progress: {pr['value']}/{pr['max']} ({int(pr['value'] * 100 / pr['max'])}%)."
     return [TextContent(type="text",
-            text=f"Still rendering (job_id={job_id}, started by another comfy-mcp "
-                 f"server).{prog} Call check_image again.")]
+            text=f"Still rendering (job_id={job_id}).{prog} Call check_image again.")]
 
 
 def _image_file_content(path: str, seed=None) -> list:

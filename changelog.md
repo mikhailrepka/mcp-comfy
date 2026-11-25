@@ -26,6 +26,12 @@ are documented here. The file is written in reverse chronological order.
 
 ### Fixed
 
+- **check_image on a foreign server is now equivalent to the native one**: all four
+  servers' foreign checks poll the shared jobstore for up to `wait` seconds
+  (new jobstore.poll — replaces a single 5 s sleep), keep progress notes, and use
+  neutral wording (no more "started by another comfy-mcp server", which misled the
+  model). Reason: the MCP client routes check_image to the LAST registered server,
+  so the foreign path is the hot path, not the exception.
 - **gen + upscale servers: readable /prompt 400 errors** (`_prompt_error_text`,
   same as edit/3D) — clients now see e.g. "node 475: Invalid image file: ..."
   instead of a bare "HTTP Error 400".
