@@ -431,8 +431,12 @@ def _foreign_check(job_id: str, wait=20) -> list:
                                     "seed": rec.get("seed")})
     if rec.get("status") == "error":
         return [TextContent(type="text", text=f"Task failed: {rec.get('error')}")]
+    pr = rec.get("progress")  # пишется сервером-владельцем в общий реестр
+    prog = ""
+    if pr and pr.get("max"):
+        prog = f" Progress: {pr['value']}/{pr['max']} ({int(pr['value'] * 100 / pr['max'])}%)."
     return [TextContent(type="text",
-            text=f"Still rendering (job_id={job_id}). Call check_image again.")]
+            text=f"Still rendering (job_id={job_id}).{prog} Call check_image again.")]
 
 
 @app.list_tools()
