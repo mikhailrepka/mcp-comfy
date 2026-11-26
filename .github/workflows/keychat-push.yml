@@ -1,0 +1,60 @@
+name: Notify KeyChat about commits
+on: push
+permissions: {}
+jobs:
+  notify:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !github.event.deleted
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send push summary
+        env:
+          DEPBOT_TOKEN: ${{ secrets.DEPBOT_TOKEN }}
+          DEPBOT_KEY: ${{ secrets.DEPBOT_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          with open(os.environ["GITHUB_EVENT_PATH"]) as source:
+              event = json.load(source)
+          commits = event.get("commits") or []
+          if not commits:
+              raise SystemExit(0)
+          repo = event["repository"]["full_name"]
+          lines = ["Ветка " + event["ref"].removeprefix("refs/heads/")[:200]]
+          for commit in commits[:5]:
+              sha = commit["id"]
+              title = (commit["message"].splitlines() or [""])[0][:100]
+              author = commit["author"]["name"][:40]
+              lines.append(f"{sha[:7]} — {author}: {title}\nhttps://github.com/{repo}/commit/{sha}")
+          if len(commits) > 5:
+              lines.append(f"Ещё коммитов: {len(commits) - 5}")
+          payload = {
+              "deployment_id": "github-push-" + os.environ["GITHUB_RUN_ID"],
+              "project": repo.rsplit("/", 1)[-1],
+              "commit_sha": event["after"],
+              "status": "pushed",
+              "comment": "\n\n".join(lines)[:2000],
+          }
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args):
+                  return None
+
+          request = urllib.request.Request(
+              "https://depbot.wokey.pro/api/v1/deployments/events",
+              data=json.dumps(payload).encode(),
+              headers={
+                  "Content-Type": "application/json",
+                  "X-Deploy-Token": os.environ["DEPBOT_TOKEN"],
+                  "X-Deploy-Key": os.environ["DEPBOT_KEY"],
+              },
+          )
+          try:
+              with urllib.request.build_opener(NoRedirect()).open(request, timeout=10) as response:
+                  if response.status != 202:
+                      raise SystemExit("Unexpected notification response")
+          except urllib.error.HTTPError as error:
+              raise SystemExit(f"Notification rejected (HTTP {error.code})")
+          PY
