@@ -7,11 +7,13 @@ are documented here. The file is written in reverse chronological order.
 
 ### Added
 
-- **`list_results` gains `inline`** (default false): when true, the newest images
-  (capped at 4) are attached to the answer as ImageContent — LM Studio shows them
-  under the tool call, the chat-bot delivers them to chat via its existing pipeline
-  (the inlined files are listed with "Image ready:" lines that its pairing regex
-  understands).
+- **`list_results` and `convert_image` gain `inline` — DEFAULT TRUE** (2026-11-26
+  flipped from false): newest/converted images (capped at 4) are attached to the
+  answer as ImageContent — LM Studio shows them under the tool call, the chat-bot
+  delivers them to chat via its existing pipeline ("Image ready:" lines that its
+  pairing regex understands). Pass inline=false only for intermediate conversions.
+  Reason: the model kept forgetting to pass inline=true, so results rendered as
+  "External image" links in LM Studio.
 - **`convert_image` gains `inline`** (same semantics): converted files (up to 4)
   attached as ImageContent; "Image ready:" lines are kept CLEAN (no size suffix on
   the same line) so the chat-bot pairing extracts the exact path.

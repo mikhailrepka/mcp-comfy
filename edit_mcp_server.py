@@ -729,15 +729,17 @@ async def _list_tools_impl():
                         "format and within the size limits is returned as 'unchanged' "
                         "without re-encoding (no generational quality loss); otherwise the "
                         "converted path is returned. Every result line reports WxH/format/KB. "
-                        "inline=true attaches the converted images (up to 4) to the answer.",
+                        "Converted images (up to 4) are attached to the answer by default.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "inline": {
                         "type": "boolean",
                         "description": "Attach the converted images (up to 4) to the answer "
-                                       "inline. Default false.",
-                        "default": False,
+                                       "inline. Default true — pass false only for "
+                                       "intermediate conversions whose result is consumed "
+                                       "by another tool call.",
+                        "default": True,
                     },
                     "paths": {
                         "type": "array",
@@ -903,7 +905,7 @@ async def call_tool(name, arguments):
         size_note = ""
         if arguments.get("max_width") or arguments.get("max_height"):
             size_note = f", max {arguments.get('max_width') or '∞'}x{arguments.get('max_height') or '∞'}"
-        inline = bool(arguments.get("inline", False))
+        inline = bool(arguments.get("inline", True))
         lines = [f"Convert to {fmt} (quality={quality}{size_note}):"]
         content = []
         attached = []

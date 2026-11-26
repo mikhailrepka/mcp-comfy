@@ -371,17 +371,16 @@ async def list_tools() -> list[Tool]:
             description="List recent result images in ~/comfy_images (generated/edited/upscaled "
                         "outputs, newest first). Use when the user refers to an earlier result "
                         "without giving a path; then pass the listed path to edit_image, "
-                        "upscale_image or convert_image. With inline=true the newest images "
-                        "(up to 4) are attached to the answer as images — use when the user "
-                        "asks to SEE recent results.",
+                        "upscale_image or convert_image. The newest images (up to 4) are "
+                        "attached to the answer by default (inline=false to skip).",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "inline": {
                         "type": "boolean",
                         "description": "Attach the newest images (up to 4) to the answer "
-                                       "inline. Default false.",
-                        "default": False,
+                                       "inline. Default true.",
+                        "default": True,
                     },
                     "limit": {
                         "type": "integer",
@@ -443,7 +442,7 @@ async def call_tool(name: str, arguments: dict) -> list:
 
     if name == "list_results":
         limit = int(arguments.get("limit", 10))
-        inline = bool(arguments.get("inline", False))
+        inline = bool(arguments.get("inline", True))
         text = _list_results_text(limit)
         if not inline:
             return [TextContent(type="text", text=text)]
